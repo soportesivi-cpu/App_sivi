@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 12.0.0"
+    "version": ">= 18.0.0",
+    "appVersionSource": "local"
   },
   "build": {
     "preview": {
@@ -14,6 +15,9 @@
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     }
   },

@@ -1,31 +1,27 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  ActivityIndicator,
   TouchableOpacity,
   ImageBackground,
   Image,
   Modal,
   ScrollView,
-  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getActiveDomain } from '../../constants/config';
 import { useAppStore } from '../../services/store';
 import { getAlerts } from '../../services/api';
 import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
-
-const { width, height } = Dimensions.get('window');
 
 type Alert = {
   id: number;
   probability: string | number;
   createdAt: string;
   device?: { name: string; deviceId?: string };
+  deviceId?: string;
   tag?: string;
   motive_categorie?: string;
   url_evidence?: string;
@@ -218,7 +214,7 @@ export default function AlertsScreen() {
                <View style={styles.evidenceContainer}>
                   <Text style={styles.sectionTitle}>Evidencia Principal</Text>
                   <Image 
-                     source={{ uri: selectedAlert ? getEvidenceUrl(selectedAlert) : '' }} 
+                     source={{ uri: selectedAlert ? getEvidenceUrl(selectedAlert) || undefined : undefined }} 
                      style={styles.evidenceImage}
                      resizeMode="cover"
                   />

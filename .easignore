@@ -1,7 +1,23 @@
+# Extensiones de archivos pesados (Binarios)
+*.apk
+*.aab
+*.zip
+*.pb
+
+# Carpetas de dependencias y sistema
 node_modules/
-android/
-ios/
+.expo/
 .git/
+dist/
+web-build/
+
+# Archivos de credenciales y logs
+*.jks
+*.pem
 *.log
 .env
 .env.*
+
+# Carpetas nativas (si usas flujo manejado)
+/ios
+/android

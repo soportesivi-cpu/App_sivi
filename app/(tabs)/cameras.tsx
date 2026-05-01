@@ -24,8 +24,15 @@ type Camera = {
   id: number;
   name: string;
   deviceId: string;
+  stream_name?: string;
   rtsp: string;
   container: any[];
+};
+
+type StreamState = 'checking' | 'connected' | 'disconnected';
+type CameraStreamStatus = {
+  hls: StreamState;
+  webrtc: StreamState;
 };
 
 export default function CamerasScreen() {
@@ -34,6 +41,7 @@ export default function CamerasScreen() {
   const [streamMode, setStreamMode] = useState<'hls' | 'webrtc'>('webrtc'); // Favorecemos webrtc como default
   const [activeLayer, setActiveLayer] = useState<'none' | 'motion' | 'face' | 'lpr'>('none');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid'); // Estado de vista
+  const [streamStatus, setStreamStatus] = useState<Record<number, CameraStreamStatus>>({});
   const webViewRef = useRef<WebView>(null);
 
   // Hook genérico para disparar la orden al WebView cuando cambie la capa
@@ -55,6 +63,34 @@ export default function CamerasScreen() {
     queryFn: () => getDevices(),
   });
   const cameras: Camera[] = qData?.rows || [];
+
+  useEffect(() => {
+    if (!cameras.length) return;
+
+    let isMounted = true;
+
+    cameras.forEach((camera) => {
+      setStreamStatus(prev => ({
+        ...prev,
+        [camera.id]: prev[camera.id] || { hls: 'checking', webrtc: 'checking' },
+      }));
+
+      validateCameraStreams(camera).then((status) => {
+        if (!isMounted) return;
+        setStreamStatus(prev => ({
+          ...prev,
+          [camera.id]: {
+            ...prev[camera.id],
+            ...status,
+          },
+        }));
+      });
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cameras, token]);
 
   // Obtenemos los eventos históricos, idealmente con polling si la modal está abierta
   const { data: alertsData } = useQuery({
@@ -111,6 +147,117 @@ export default function CamerasScreen() {
     return 'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=300&q=80';
   }
 
+  function updateStreamStatus(cameraId: number, protocol: keyof CameraStreamStatus, state: StreamState) {
+    setStreamStatus(prev => ({
+      ...prev,
+      [cameraId]: {
+        hls: prev[cameraId]?.hls || 'checking',
+        webrtc: prev[cameraId]?.webrtc || 'checking',
+        [protocol]: state,
+      },
+    }));
+  }
+
+  function resolveUrl(baseUrl: string, path: string) {
+    if (path.startsWith('http')) return path;
+    const base = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
+    return base + path;
+  }
+
+  async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function validateHlsStream(camera: Camera): Promise<StreamState> {
+    try {
+      const playlistUrl = getHlsUrl(camera);
+      const manifestRes = await fetchWithTimeout(playlistUrl, { cache: 'no-store' as any });
+      if (!manifestRes.ok) return 'disconnected';
+
+      const manifest = await manifestRes.text();
+      if (!manifest.includes('#EXTM3U')) return 'disconnected';
+
+      const mediaLine = manifest
+        .split('\n')
+        .map(line => line.trim())
+        .find(line => line && !line.startsWith('#'));
+
+      if (!mediaLine) return 'disconnected';
+
+      const mediaUrl = resolveUrl(playlistUrl, mediaLine);
+      if (mediaUrl.endsWith('.m3u8')) {
+        const nestedRes = await fetchWithTimeout(mediaUrl, { cache: 'no-store' as any });
+        if (!nestedRes.ok) return 'disconnected';
+
+        const nestedManifest = await nestedRes.text();
+        const segmentLine = nestedManifest
+          .split('\n')
+          .map(line => line.trim())
+          .find(line => line && !line.startsWith('#'));
+
+        if (!segmentLine) return 'disconnected';
+
+        const segmentRes = await fetchWithTimeout(resolveUrl(mediaUrl, segmentLine), {
+          headers: { Range: 'bytes=0-256' },
+        });
+        return segmentRes.ok || segmentRes.status === 206 ? 'connected' : 'disconnected';
+      }
+
+      const segmentRes = await fetchWithTimeout(mediaUrl, {
+        headers: { Range: 'bytes=0-256' },
+      });
+      return segmentRes.ok || segmentRes.status === 206 ? 'connected' : 'disconnected';
+    } catch {
+      return 'disconnected';
+    }
+  }
+
+  async function validateWebRtcEndpoint(camera: Camera): Promise<StreamState> {
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const res = await fetchWithTimeout(getWebRtcUrl(camera), {
+        method: 'OPTIONS',
+        headers,
+      });
+      return res.status >= 200 && res.status < 500 && res.status !== 404 ? 'connected' : 'disconnected';
+    } catch {
+      return 'disconnected';
+    }
+  }
+
+  async function validateCameraStreams(camera: Camera): Promise<CameraStreamStatus> {
+    const [hls, webrtc] = await Promise.all([
+      validateHlsStream(camera),
+      validateWebRtcEndpoint(camera),
+    ]);
+
+    return { hls, webrtc };
+  }
+
+  function getCameraStatus(camera: Camera) {
+    return streamStatus[camera.id] || { hls: 'checking', webrtc: 'checking' };
+  }
+
+  function isOnline(camera: Camera) {
+    const status = getCameraStatus(camera);
+    return status.hls === 'connected' || status.webrtc === 'connected';
+  }
+
+  function getStatusLabel(camera: Camera) {
+    const status = getCameraStatus(camera);
+    if (status.hls === 'checking' || status.webrtc === 'checking') return 'verificando';
+    if (status.hls === 'connected' && status.webrtc === 'connected') return 'HLS/WebRTC';
+    if (status.hls === 'connected') return 'HLS conectado';
+    if (status.webrtc === 'connected') return 'WebRTC conectado';
+    return 'desconectada';
+  }
+
   function getWebRtcHtml(camera: Camera) {
     const whepUrl = getWebRtcUrl(camera);
     return `
@@ -139,6 +286,9 @@ export default function CamerasScreen() {
           // ----- CORE DEL VIDEO (WebRTC) -----
           const video = document.getElementById('video');
           const err = document.getElementById('err');
+          const debugDiv = document.getElementById('debug');
+          let videoSocket = null;
+          let currentLayer = 'none';
           function showError(msg) { err.style.display = 'block'; err.innerText = msg; }
 
           async function startWebRTC() {
@@ -151,6 +301,9 @@ export default function CamerasScreen() {
                 if (video.srcObject !== event.streams[0]) {
                   video.srcObject = event.streams[0];
                   err.style.display = 'none'; // ocultar error si entra video
+                  if (window.ReactNativeWebView) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'webrtc', state: 'connected' }));
+                  }
                 }
               };
 
@@ -215,6 +368,9 @@ export default function CamerasScreen() {
             } catch (e) {
               console.error(e);
               showError('WHEP: ' + e.message + ' (Revisa SSL/CORS)');
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'webrtc', state: 'disconnected' }));
+              }
             }
           }
           startWebRTC();
@@ -232,6 +388,7 @@ export default function CamerasScreen() {
           resize();
 
           window.setAnalyticLayer = function(layerName, deviceId, domain) {
+              const streamName = deviceId;
               currentLayer = layerName;
               ctx.clearRect(0, 0, overlay.width, overlay.height);
               
@@ -415,6 +572,9 @@ export default function CamerasScreen() {
           var video = document.getElementById('video');
           var err = document.getElementById('err');
           var url = '${videoUrl}';
+          var debugDiv = document.getElementById('debug');
+          var videoSocket = null;
+          var currentLayer = 'none';
           
           if (Hls.isSupported()) {
             var hls = new Hls({ debug: false, enableWorker: true });
@@ -423,10 +583,18 @@ export default function CamerasScreen() {
             hls.on(Hls.Events.MANIFEST_PARSED, function() {
               video.play().catch(function(e) { console.log(e); });
             });
+            video.addEventListener('canplay', function() {
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'connected' }));
+              }
+            });
             hls.on(Hls.Events.ERROR, function(e, data) {
               if(data.fatal) {
                 err.style.display = 'block';
                 err.innerText = 'HLS Error: ' + data.details;
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'disconnected' }));
+                }
               }
             });
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -434,9 +602,17 @@ export default function CamerasScreen() {
             video.addEventListener('loadedmetadata', function() {
               video.play().catch(function(e) { console.log(e); });
             });
+            video.addEventListener('canplay', function() {
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'connected' }));
+              }
+            });
             video.addEventListener('error', function() {
               err.style.display = 'block';
               err.innerText = 'Native HLS Error';
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'disconnected' }));
+              }
             });
           } else {
             err.style.display = 'block';
@@ -456,6 +632,7 @@ export default function CamerasScreen() {
           resize();
 
           window.setAnalyticLayer = function(layerName, deviceId, domain) {
+              var streamName = deviceId;
               currentLayer = layerName;
               ctx.clearRect(0, 0, overlay.width, overlay.height);
               
@@ -589,10 +766,6 @@ export default function CamerasScreen() {
     `;
   }
 
-  function isOnline(camera: Camera) {
-    return camera.container?.some(c => c.status === 'running') || true;
-  }
-
   if (loading) {
     return <Loading />;
   }
@@ -625,7 +798,9 @@ export default function CamerasScreen() {
         contentContainerStyle={styles.lista}
         columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : undefined}
         renderItem={({ item }) => {
-          
+          const online = isOnline(item);
+          const statusLabel = getStatusLabel(item);
+
           if (viewMode === 'grid') {
             return (
               <TouchableOpacity
@@ -639,13 +814,13 @@ export default function CamerasScreen() {
                 >
                    <View style={[
                       styles.cardGridDot,
-                      { backgroundColor: isOnline(item) ? '#4caf50' : '#ffffff22' }
+                      { backgroundColor: online ? '#4caf50' : '#ffffff22' }
                    ]} />
                    <Ionicons name="play-circle" size={42} color="#ffffff80" />
                 </ImageBackground>
                 <View style={styles.cardGridBottom}>
                   <Text style={styles.cardNombre} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.cardGridStatus}>HLS · {isOnline(item) ? 'activa' : 'off'}</Text>
+                  <Text style={styles.cardGridStatus}>{statusLabel}</Text>
                 </View>
               </TouchableOpacity>
             );
@@ -661,7 +836,7 @@ export default function CamerasScreen() {
                   <Ionicons
                     name="videocam"
                     size={20}
-                    color={isOnline(item) ? '#2196f3' : '#ffffff30'}
+                    color={online ? '#2196f3' : '#ffffff30'}
                   />
                 </View>
                 <View style={styles.cardInfo}>
@@ -674,17 +849,17 @@ export default function CamerasScreen() {
               <View style={styles.cardRight}>
                 <View style={[
                   styles.statusBadge,
-                  { backgroundColor: isOnline(item) ? '#4caf5018' : '#ffffff08' }
+                  { backgroundColor: online ? '#4caf5018' : '#ffffff08' }
                 ]}>
                   <View style={[
                     styles.statusDot,
-                    { backgroundColor: isOnline(item) ? '#4caf50' : '#ffffff22' }
+                    { backgroundColor: online ? '#4caf50' : '#ffffff22' }
                   ]} />
                   <Text style={[
                     styles.statusText,
-                    { color: isOnline(item) ? '#4caf50' : '#ffffff30' }
+                    { color: online ? '#4caf50' : '#ffffff30' }
                   ]}>
-                    {isOnline(item) ? 'LIVE' : 'OFF'}
+                    {online ? 'CONECTADO' : 'DESCONECTADO'}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#2196f3" />
@@ -776,10 +951,12 @@ export default function CamerasScreen() {
                 style={styles.webview}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
-                backgroundColor="#0d0d0d"
                 onMessage={(event) => {
                   try {
                     const evt = JSON.parse(event.nativeEvent.data);
+                    if (evt.type === 'stream_status' && selected) {
+                      updateStreamStatus(selected.id, evt.protocol, evt.state);
+                    }
                     if (evt.type === 'draw_streaming') {
                       console.log('📌 OJO AQUÍ, JSON CHIVATO:', JSON.stringify(evt.payload, null, 2));
                     }

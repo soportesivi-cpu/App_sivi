@@ -28,6 +28,7 @@ export default function DashboardScreen() {
   });
 
   const loading = isStateLoading || isDashboardLoading;
+  const styles = getStyles(isDarkMode);
 
   async function cerrarSesion() {
     await clearSession();
@@ -65,8 +66,6 @@ export default function DashboardScreen() {
   const cpu = Number(stateData?.states?.cpu?.percent || 0);
   const ram = Number(stateData?.states?.ram?.percent || 0);
   const totalDisks = Object.keys(stateData?.states || {}).filter(k => k.startsWith('disk')).length || '—';
-
-  const styles = getStyles(isDarkMode);
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
