@@ -5,7 +5,7 @@
     "scheme": "aliceguardian",
     "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./bg-grande.png",
+    "icon": "./assets/icon-sivi.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./bg-grande.png",
@@ -18,8 +18,8 @@
     "android": {
       "versionCode": 2,
       "adaptiveIcon": {
-        "foregroundImage": "./bg-grande.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/icon-sivi.png",
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,

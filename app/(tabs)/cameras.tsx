@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -42,13 +42,21 @@ export default function CamerasScreen() {
   const [activeLayer, setActiveLayer] = useState<'none' | 'motion' | 'face' | 'lpr'>('none');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid'); // Estado de vista
   const [streamStatus, setStreamStatus] = useState<Record<number, CameraStreamStatus>>({});
+  const [cameraThumbnails, setCameraThumbnails] = useState<Record<number, string>>({});
+  const [thumbnailFailures, setThumbnailFailures] = useState<Record<number, boolean>>({});
+  const [thumbnailCameraId, setThumbnailCameraId] = useState<number | null>(null);
   const webViewRef = useRef<WebView>(null);
+
+  // --- Memoización del HTML del stream para evitar bucles de recarga ---
+  // Solo se regenera cuando cambia la cámara seleccionada o el modo de stream
+  const memoizedStreamHtml = useRef<{ html: string; key: string } | null>(null);
+  const streamUpdateRef = useRef(updateStreamStatus);
 
   // Hook genérico para disparar la orden al WebView cuando cambie la capa
   useEffect(() => {
     if (selected && webViewRef.current) {
       setTimeout(() => {
-          webViewRef.current?.injectJavaScript(`
+        webViewRef.current?.injectJavaScript(`
             if(window.setAnalyticLayer) {
                window.setAnalyticLayer('${activeLayer}', '${getStreamName(selected)}', '${domain}');
             }
@@ -63,6 +71,9 @@ export default function CamerasScreen() {
     queryFn: () => getDevices(),
   });
   const cameras: Camera[] = qData?.rows || [];
+  const thumbnailCamera = thumbnailCameraId
+    ? cameras.find(camera => camera.id === thumbnailCameraId) || null
+    : null;
 
   useEffect(() => {
     if (!cameras.length) return;
@@ -92,14 +103,39 @@ export default function CamerasScreen() {
     };
   }, [cameras, token]);
 
+  useEffect(() => {
+    if (viewMode !== 'grid' || thumbnailCameraId !== null) return;
+
+    const nextCamera = cameras.find(camera =>
+      isOnline(camera) &&
+      !cameraThumbnails[camera.id] &&
+      !thumbnailFailures[camera.id]
+    );
+
+    if (nextCamera) {
+      setThumbnailCameraId(nextCamera.id);
+    }
+  }, [viewMode, cameras, streamStatus, cameraThumbnails, thumbnailFailures, thumbnailCameraId]);
+
+  useEffect(() => {
+    if (thumbnailCameraId === null) return;
+
+    const timeout = setTimeout(() => {
+      setThumbnailFailures(prev => ({ ...prev, [thumbnailCameraId]: true }));
+      setThumbnailCameraId(null);
+    }, 10000);
+
+    return () => clearTimeout(timeout);
+  }, [thumbnailCameraId]);
+
   // Obtenemos los eventos históricos, idealmente con polling si la modal está abierta
   const { data: alertsData } = useQuery({
     queryKey: ['camera_alerts_live', activeLayer],
     queryFn: () => {
-        if (activeLayer === 'face') return getFaces(1);
-        if (activeLayer === 'motion') return getMotion(1);
-        if (activeLayer === 'lpr') return getObjects(1); // Mapeo temporal si lpr lo usa
-        return getAlerts(1);
+      if (activeLayer === 'face') return getFaces(1);
+      if (activeLayer === 'motion') return getMotion(1);
+      if (activeLayer === 'lpr') return getObjects(1); // Mapeo temporal si lpr lo usa
+      return getAlerts(1);
     },
     enabled: !!selected,
     refetchInterval: 5000,
@@ -124,17 +160,19 @@ export default function CamerasScreen() {
     // Fallback por si la API no devuelve stream_name (aunque la doc dice que sí)
     let cleanName = camera.name;
     if (cleanName.includes('_')) {
-        let parts = cleanName.split('_');
-        if (['bellavista'].includes(parts[0].toLowerCase())) {
-            cleanName = cleanName.substring(cleanName.indexOf('_') + 1);
-        }
+      let parts = cleanName.split('_');
+      if (['bellavista'].includes(parts[0].toLowerCase())) {
+        cleanName = cleanName.substring(cleanName.indexOf('_') + 1);
+      }
     }
     return `${cleanName}-${camera.deviceId}`;
   }
 
-  function getHlsUrl(camera: Camera) {
+  function getHlsUrl(camera: Camera, cacheBust?: number) {
     // MAGIA SSL: Igualmente cruzamos por el proxy certificado para el HLS
-    return `https://alarms.guardian.imperium.pe/hls/${getStreamName(camera)}/index.m3u8`;
+    // El cacheBust se genera UNA sola vez al abrir la cámara (evita loops de iOS)
+    const suffix = cacheBust ? `?_cb=${cacheBust}` : '';
+    return `https://alarms.guardian.imperium.pe/hls/${getStreamName(camera)}/index.m3u8${suffix}`;
   }
 
   function getWebRtcUrl(camera: Camera) {
@@ -145,6 +183,95 @@ export default function CamerasScreen() {
 
   function getCameraThumbnail(camera: Camera) {
     return 'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=300&q=80';
+  }
+
+  function getThumbnailCaptureHtml(camera: Camera) {
+    const videoUrl = getHlsUrl(camera);
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12"></script>
+        <style>
+          html, body { margin: 0; padding: 0; width: 160px; height: 90px; background: #050505; overflow: hidden; }
+          video { width: 160px; height: 90px; object-fit: cover; background: #050505; }
+          canvas { display: none; }
+        </style>
+      </head>
+      <body>
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas" width="320" height="180"></canvas>
+        <script>
+          var video = document.getElementById('video');
+          var canvas = document.getElementById('canvas');
+          var url = '${videoUrl}';
+          var attempts = 0;
+          var done = false;
+
+          video.crossOrigin = 'anonymous';
+
+          function post(payload) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+            }
+          }
+
+          function fail() {
+            if (done) return;
+            done = true;
+            post({ type: 'camera_thumbnail_failed', cameraId: ${camera.id} });
+          }
+
+          function capture() {
+            if (done) return;
+            attempts += 1;
+
+            if (!video.videoWidth || !video.videoHeight) {
+              if (attempts > 10) fail();
+              else setTimeout(capture, 500);
+              return;
+            }
+
+            try {
+              var ctx = canvas.getContext('2d');
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              var uri = canvas.toDataURL('image/jpeg', 0.72);
+              done = true;
+              post({ type: 'camera_thumbnail', cameraId: ${camera.id}, uri: uri });
+            } catch (e) {
+              if (attempts > 10) fail();
+              else setTimeout(capture, 500);
+            }
+          }
+
+          video.addEventListener('loadeddata', function() { setTimeout(capture, 400); });
+          video.addEventListener('canplay', function() { setTimeout(capture, 400); });
+          video.addEventListener('error', fail);
+          setTimeout(fail, 9000);
+
+          if (window.Hls && Hls.isSupported()) {
+            var hls = new Hls({ debug: false, enableWorker: true, lowLatencyMode: true });
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, function() {
+              video.play().catch(function() {});
+            });
+            hls.on(Hls.Events.ERROR, function(e, data) {
+              if (data && data.fatal) fail();
+            });
+          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+            video.addEventListener('loadedmetadata', function() {
+              video.play().catch(function() {});
+            });
+          } else {
+            fail();
+          }
+        </script>
+      </body>
+      </html>
+    `;
   }
 
   function updateStreamStatus(cameraId: number, protocol: keyof CameraStreamStatus, state: StreamState) {
@@ -598,22 +725,39 @@ export default function CamerasScreen() {
               }
             });
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
+            var retryCount = 0;
+            function loadNative() {
+              var bust = retryCount > 0 ? (url.includes('?') ? '&retry=' : '?retry=') + retryCount : '';
+              video.src = url + bust;
+              video.load();
+            }
+
             video.addEventListener('loadedmetadata', function() {
               video.play().catch(function(e) { console.log(e); });
+              err.style.display = 'none';
             });
+
             video.addEventListener('canplay', function() {
               if (window.ReactNativeWebView) {
                 window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'connected' }));
               }
             });
+
             video.addEventListener('error', function() {
-              err.style.display = 'block';
-              err.innerText = 'Native HLS Error';
-              if (window.ReactNativeWebView) {
-                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'disconnected' }));
+              if (retryCount < 3) {
+                retryCount++;
+                console.log('Retry Native HLS: ' + retryCount);
+                setTimeout(loadNative, 2000);
+              } else {
+                err.style.display = 'block';
+                err.innerText = 'Native HLS Error';
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'hls', state: 'disconnected' }));
+                }
               }
             });
+
+            loadNative();
           } else {
             err.style.display = 'block';
             err.innerText = 'HLS is not supported on this browser/device.';
@@ -781,7 +925,7 @@ export default function CamerasScreen() {
           <Text style={styles.titulo}>Cámaras</Text>
           <Text style={styles.subtitulo}>{cameras.length} dispositivos</Text>
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.toggleViewBtn}
           onPress={() => setViewMode(prev => prev === 'list' ? 'grid' : 'list')}
         >
@@ -807,19 +951,19 @@ export default function CamerasScreen() {
                 style={styles.cardGrid}
                 onPress={() => setSelected(item)}
               >
-                <ImageBackground 
-                   source={{ uri: getCameraThumbnail(item) }} 
-                   style={styles.cardGridTop}
-                   imageStyle={{ opacity: 0.6 }}
+                <ImageBackground
+                  source={{ uri: cameraThumbnails[item.id] || getCameraThumbnail(item) }}
+                  style={styles.cardGridTop}
+                  imageStyle={{ opacity: 0.6 }}
                 >
-                   <View style={[
-                      styles.cardGridDot,
-                      { backgroundColor: online ? '#4caf50' : '#ffffff22' }
-                   ]} />
-                   <Ionicons name="play-circle" size={42} color="#ffffff80" />
+                  <View style={[
+                    styles.cardGridDot,
+                    { backgroundColor: online ? '#4caf50' : '#ffffff22' }
+                  ]} />
+                  <Ionicons name="play-circle" size={42} color="#ffffff80" />
                 </ImageBackground>
                 <View style={styles.cardGridBottom}>
-                  <Text style={styles.cardNombre} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.cardGridName}>{item.name}</Text>
                   <Text style={styles.cardGridStatus}>{statusLabel}</Text>
                 </View>
               </TouchableOpacity>
@@ -876,6 +1020,46 @@ export default function CamerasScreen() {
         }
       />
 
+      {thumbnailCamera && (
+        <View style={styles.thumbnailWorker}>
+          <WebView
+            key={thumbnailCamera.id}
+            source={{ html: getThumbnailCaptureHtml(thumbnailCamera), baseUrl: `https://alarms.guardian.imperium.pe` }}
+            style={styles.thumbnailWorkerWebview}
+            scrollEnabled={false}
+            allowsInlineMediaPlayback={true}
+            mediaPlaybackRequiresUserAction={false}
+            onMessage={(event) => {
+              try {
+                const evt = JSON.parse(event.nativeEvent.data);
+
+                if (evt.type === 'camera_thumbnail' && evt.uri) {
+                  setCameraThumbnails(prev => ({
+                    ...prev,
+                    [evt.cameraId]: evt.uri,
+                  }));
+                  setThumbnailCameraId(null);
+                }
+
+                if (evt.type === 'camera_thumbnail_failed') {
+                  setThumbnailFailures(prev => ({
+                    ...prev,
+                    [evt.cameraId]: true,
+                  }));
+                  setThumbnailCameraId(null);
+                }
+              } catch (e) {
+                setThumbnailFailures(prev => ({
+                  ...prev,
+                  [thumbnailCamera.id]: true,
+                }));
+                setThumbnailCameraId(null);
+              }
+            }}
+          />
+        </View>
+      )}
+
       {/* MODAL DE VIDEO */}
       <Modal
         visible={!!selected}
@@ -924,9 +1108,9 @@ export default function CamerasScreen() {
                   style={[
                     styles.layerBtn,
                     activeLayer === layer && styles.layerBtnActive,
-                    layer === 'face' && activeLayer === layer && {backgroundColor: '#4caf50'}, // Face color
-                    layer === 'lpr'  && activeLayer === layer && {backgroundColor: '#2196f3'},  // LPR color
-                    layer === 'motion'&& activeLayer === layer && {backgroundColor: '#ff5722'},// Motion color
+                    layer === 'face' && activeLayer === layer && { backgroundColor: '#4caf50' }, // Face color
+                    layer === 'lpr' && activeLayer === layer && { backgroundColor: '#2196f3' },  // LPR color
+                    layer === 'motion' && activeLayer === layer && { backgroundColor: '#ff5722' },// Motion color
                   ]}
                   onPress={() => setActiveLayer(layer as any)}
                 >
@@ -938,16 +1122,16 @@ export default function CamerasScreen() {
             </View>
           </View>
 
-          {/* VIDEO CONTENEDOR */}
+          {/* VIDEO CONTENEDOR - usamos key para que solo se recargue al cambiar cámara/modo */}
           {selected && (
             <View style={styles.videoContainer}>
               <WebView
+                key={`stream-${selected.id}-${streamMode}`}
                 ref={webViewRef}
-                source={
-                  streamMode === 'hls'
-                    ? { html: getHlsHtml(selected), baseUrl: `https://alarms.guardian.imperium.pe` }
-                    : { html: getWebRtcHtml(selected), baseUrl: `https://alarms.guardian.imperium.pe` }
-                }
+                source={{
+                  html: streamMode === 'hls' ? getHlsHtml(selected) : getWebRtcHtml(selected),
+                  baseUrl: 'https://alarms.guardian.imperium.pe'
+                }}
                 style={styles.webview}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
@@ -960,14 +1144,14 @@ export default function CamerasScreen() {
                     if (evt.type === 'draw_streaming') {
                       console.log('📌 OJO AQUÍ, JSON CHIVATO:', JSON.stringify(evt.payload, null, 2));
                     }
-                  } catch(e) {}
+                  } catch (e) { }
                 }}
               />
             </View>
           )}
 
           {/* LA TABLA / LISTADO DE EVENTOS */}
-          <FlatList 
+          <FlatList
             data={filteredEvents}
             keyExtractor={(item) => item.id.toString()}
             style={{ flex: 1, backgroundColor: isDarkMode ? '#0d0d0d' : '#f9fafb' }}
@@ -986,7 +1170,7 @@ export default function CamerasScreen() {
                     Sector Principal - {selected?.name?.replace(/_/g, ' ')}
                   </Text>
                 </View>
-                
+
                 <Text style={styles.eventsTitle}>Registros ({activeLayer.toUpperCase()})</Text>
               </View>
             }
@@ -994,27 +1178,27 @@ export default function CamerasScreen() {
               const urlImage = (item.url_evidence || item.face_detected_url || '').replace('/alice-media', `https://${domain}`);
               return (
                 <View style={styles.eventRow}>
-                   <ImageBackground 
-                      source={{ uri: urlImage || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
-                      style={styles.eventThumb}
-                      imageStyle={{ borderRadius: 6 }}
-                   />
-                   <View style={styles.eventDetails}>
-                      <Text style={styles.eventTag}>{item.tag?.toUpperCase() || item.motive_categorie?.toUpperCase() || 'ALERTA'}</Text>
-                      <Text style={styles.eventDate}>{formatShortDate(item.createdAt)}</Text>
-                   </View>
-                   <View style={styles.eventProbBox}>
-                      <Text style={styles.eventProb}>{Math.round(item.probability > 1 ? item.probability : item.probability * 100)}%</Text>
-                      <Text style={styles.eventProbLabel}>PROB.</Text>
-                   </View>
+                  <ImageBackground
+                    source={{ uri: urlImage || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
+                    style={styles.eventThumb}
+                    imageStyle={{ borderRadius: 6 }}
+                  />
+                  <View style={styles.eventDetails}>
+                    <Text style={styles.eventTag}>{item.tag?.toUpperCase() || item.motive_categorie?.toUpperCase() || 'ALERTA'}</Text>
+                    <Text style={styles.eventDate}>{formatShortDate(item.createdAt)}</Text>
+                  </View>
+                  <View style={styles.eventProbBox}>
+                    <Text style={styles.eventProb}>{Math.round(item.probability > 1 ? item.probability : item.probability * 100)}%</Text>
+                    <Text style={styles.eventProbLabel}>PROB.</Text>
+                  </View>
                 </View>
               );
             }}
             ListEmptyComponent={
-               <View style={styles.emptyEvents}>
-                 <Ionicons name="folder-open-outline" size={32} color="#ffffff20" />
-                 <Text style={styles.emptyEventsText}>No hay eventos de {activeLayer === 'none' ? 'ningún tipo' : activeLayer.toUpperCase()} para esta cámara.</Text>
-               </View>
+              <View style={styles.emptyEvents}>
+                <Ionicons name="folder-open-outline" size={32} color="#ffffff20" />
+                <Text style={styles.emptyEventsText}>No hay eventos de {activeLayer === 'none' ? 'ningún tipo' : activeLayer.toUpperCase()} para esta cámara.</Text>
+              </View>
             }
           />
 
@@ -1037,342 +1221,362 @@ const getStyles = (isDark: boolean) => {
   const toggleText = isDark ? '#ffffff50' : '#6b7280';
 
   return StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: bgMain,
-    paddingTop: 60,
-  },
-  centrado: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 80,
-  },
-  header: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerTitleWrap: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-  },
-  toggleViewBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: isDark ? '#ffffff10' : '#e5e7eb',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  titulo: {
-    color: textPrimary,
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  subtitulo: {
-    color: '#3498db',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  modeToggleContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 20,
-    marginTop: 10,
-    backgroundColor: toggleBg,
-    borderRadius: 8,
-    padding: 4,
-  },
-  modeToggle: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 6,
-  },
-  modeToggleActive: {
-    backgroundColor: '#2196f3',
-  },
-  modeToggleText: {
-    color: toggleText,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  modeToggleTextActive: {
-    color: '#ffffff',
-  },
-  lista: {
-    paddingHorizontal: 20,
-    gap: 15,
-    paddingBottom: 20,
-  },
-  gridRow: {
-    justifyContent: 'space-between',
-  },
-  cardGrid: {
-    width: '48%',
-    backgroundColor: bgCard,
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: borderCol,
-  },
-  cardGridTop: {
-    backgroundColor: '#050505',
-    aspectRatio: 1.25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  cardGridDot: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  cardGridBottom: {
-    padding: 12,
-    backgroundColor: bgCard,
-  },
-  cardGridStatus: {
-    color: textSecondary,
-    fontSize: 10,
-    marginTop: 3,
-  },
-  card: {
-    backgroundColor: bgCard,
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: borderCol,
-  },
-  cardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: isDark ? '#2196f318' : '#e0f2fe',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: isDark ? '#2196f330' : '#bae6fd',
-  },
-  cardInfo: {
-    flex: 1,
-  },
-  cardNombre: {
-    color: textPrimary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  cardId: {
-    color: textMuted,
-    fontSize: 10,
-    marginTop: 3,
-  },
-  cardRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  vacio: {
-    color: textMuted,
-    fontSize: 14,
-    marginTop: 16,
-  },
-  modal: {
-    flex: 1,
-    backgroundColor: modalBg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: borderCol,
-  },
-  modalTitulo: {
-    color: textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  modalSub: {
-    color: '#2196f3',
-    fontSize: 11,
-    marginTop: 3,
-  },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: isDark ? '#ffffff10' : '#e5e7eb',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoContainer: {
-    width: '100%',
-    aspectRatio: 16/9,
-    backgroundColor: '#000000',
-    marginTop: 20,
-    marginBottom: 20,
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  modalInfo: {
-    padding: 20,
-    gap: 12,
-  },
-  infoRow: {
-    backgroundColor: bgCard,
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: borderCol,
-  },
-  infoLabel: {
-    color: textMuted,
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  infoVal: {
-    color: textSecondary,
-    fontSize: 12,
-  },
-  eventsTitle: {
-    color: textPrimary,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 15,
-    marginBottom: 5,
-    textTransform: 'uppercase',
-  },
-  eventRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: bgCard,
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: borderCol,
-  },
-  eventThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 6,
-    marginRight: 12,
-    backgroundColor: '#000',
-  },
-  eventDetails: {
-    flex: 1,
-  },
-  eventTag: {
-    color: '#2196f3',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  eventDate: {
-    color: textMuted,
-    fontSize: 11,
-    marginTop: 3,
-  },
-  eventProbBox: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  eventProb: {
-    color: textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  eventProbLabel: {
-    color: textMuted,
-    fontSize: 9,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  emptyEvents: {
-    paddingVertical: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  emptyEventsText: {
-    color: textMuted,
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  analyticsToolbar: {
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
-  analyticsTitle: {
-    color: textMuted,
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  layerButtonsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  layerBtn: {
-    flex: 1,
-    backgroundColor: bgCard,
-    paddingVertical: 10,
-    marginHorizontal: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: borderCol,
-    alignItems: 'center',
-  },
-  layerBtnActive: {
-    borderColor: 'transparent',
-  },
-  layerBtnText: {
-    color: textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  layerBtnTextActive: {
-    color: '#fff',
-  },
-});
+    container: {
+      flex: 1,
+      backgroundColor: bgMain,
+      paddingTop: 60,
+    },
+    centrado: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingTop: 80,
+    },
+    header: {
+      paddingHorizontal: 20,
+      marginBottom: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    headerTitleWrap: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+    },
+    toggleViewBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: isDark ? '#ffffff10' : '#e5e7eb',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    titulo: {
+      color: textPrimary,
+      fontSize: 24,
+      fontWeight: '700',
+    },
+    subtitulo: {
+      color: '#3498db',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    modeToggleContainer: {
+      flexDirection: 'row',
+      marginHorizontal: 20,
+      marginTop: 10,
+      backgroundColor: toggleBg,
+      borderRadius: 8,
+      padding: 4,
+    },
+    modeToggle: {
+      flex: 1,
+      paddingVertical: 8,
+      alignItems: 'center',
+      borderRadius: 6,
+    },
+    modeToggleActive: {
+      backgroundColor: '#2196f3',
+    },
+    modeToggleText: {
+      color: toggleText,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    modeToggleTextActive: {
+      color: '#ffffff',
+    },
+    lista: {
+      paddingHorizontal: 20,
+      gap: 15,
+      paddingBottom: 20,
+    },
+    gridRow: {
+      justifyContent: 'space-between',
+    },
+    cardGrid: {
+      width: '48%',
+      backgroundColor: bgCard,
+      borderRadius: 12,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    cardGridTop: {
+      backgroundColor: '#050505',
+      aspectRatio: 1.25,
+      justifyContent: 'center',
+      alignItems: 'center',
+      position: 'relative',
+    },
+    thumbnailWorker: {
+      position: 'absolute',
+      left: -500,
+      top: -500,
+      width: 160,
+      height: 90,
+      opacity: 0.01,
+    },
+    thumbnailWorkerWebview: {
+      width: 160,
+      height: 90,
+      backgroundColor: '#050505',
+    },
+    cardGridDot: {
+      position: 'absolute',
+      top: 10,
+      left: 10,
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    cardGridBottom: {
+      padding: 12,
+      backgroundColor: bgCard,
+      minHeight: 72,
+    },
+    cardGridName: {
+      color: textPrimary,
+      fontSize: 12,
+      fontWeight: '700',
+      lineHeight: 16,
+    },
+    cardGridStatus: {
+      color: textSecondary,
+      fontSize: 10,
+      marginTop: 3,
+    },
+    card: {
+      backgroundColor: bgCard,
+      borderRadius: 12,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    cardLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      flex: 1,
+    },
+    iconContainer: {
+      width: 40,
+      height: 40,
+      borderRadius: 10,
+      backgroundColor: isDark ? '#2196f318' : '#e0f2fe',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: isDark ? '#2196f330' : '#bae6fd',
+    },
+    cardInfo: {
+      flex: 1,
+    },
+    cardNombre: {
+      color: textPrimary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    cardId: {
+      color: textMuted,
+      fontSize: 10,
+      marginTop: 3,
+    },
+    cardRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    statusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 20,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    statusText: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 1,
+    },
+    vacio: {
+      color: textMuted,
+      fontSize: 14,
+      marginTop: 16,
+    },
+    modal: {
+      flex: 1,
+      backgroundColor: modalBg,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 60,
+      paddingBottom: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: borderCol,
+    },
+    modalTitulo: {
+      color: textPrimary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    modalSub: {
+      color: '#2196f3',
+      fontSize: 11,
+      marginTop: 3,
+    },
+    closeBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: isDark ? '#ffffff10' : '#e5e7eb',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    videoContainer: {
+      width: '100%',
+      aspectRatio: 16 / 9,
+      backgroundColor: '#000000',
+      marginTop: 20,
+      marginBottom: 20,
+    },
+    webview: {
+      flex: 1,
+      backgroundColor: 'transparent',
+    },
+    modalInfo: {
+      padding: 20,
+      gap: 12,
+    },
+    infoRow: {
+      backgroundColor: bgCard,
+      borderRadius: 10,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    infoLabel: {
+      color: textMuted,
+      fontSize: 10,
+      fontWeight: '600',
+      letterSpacing: 1,
+      textTransform: 'uppercase',
+      marginBottom: 6,
+    },
+    infoVal: {
+      color: textSecondary,
+      fontSize: 12,
+    },
+    eventsTitle: {
+      color: textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+      marginTop: 15,
+      marginBottom: 5,
+      textTransform: 'uppercase',
+    },
+    eventRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: bgCard,
+      padding: 10,
+      borderRadius: 8,
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    eventThumb: {
+      width: 46,
+      height: 46,
+      borderRadius: 6,
+      marginRight: 12,
+      backgroundColor: '#000',
+    },
+    eventDetails: {
+      flex: 1,
+    },
+    eventTag: {
+      color: '#2196f3',
+      fontSize: 11,
+      fontWeight: '800',
+    },
+    eventDate: {
+      color: textMuted,
+      fontSize: 11,
+      marginTop: 3,
+    },
+    eventProbBox: {
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    eventProb: {
+      color: textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    eventProbLabel: {
+      color: textMuted,
+      fontSize: 9,
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    emptyEvents: {
+      paddingVertical: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+    },
+    emptyEventsText: {
+      color: textMuted,
+      fontSize: 12,
+      textAlign: 'center',
+    },
+    analyticsToolbar: {
+      paddingHorizontal: 20,
+      marginTop: 10,
+    },
+    analyticsTitle: {
+      color: textMuted,
+      fontSize: 12,
+      marginBottom: 8,
+    },
+    layerButtonsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    layerBtn: {
+      flex: 1,
+      backgroundColor: bgCard,
+      paddingVertical: 10,
+      marginHorizontal: 3,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: borderCol,
+      alignItems: 'center',
+    },
+    layerBtnActive: {
+      borderColor: 'transparent',
+    },
+    layerBtnText: {
+      color: textSecondary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    layerBtnTextActive: {
+      color: '#fff',
+    },
+  });
 };
