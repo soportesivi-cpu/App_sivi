@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "Sivi",
+    "name": "Sivi_app",
     "slug": "AliceGuardianApp",
     "scheme": "aliceguardian",
-    "version": "1.0.1",
+    "version": "1.2",
     "orientation": "portrait",
     "icon": "./assets/icon-sivi.png",
     "userInterfaceStyle": "light",
@@ -16,7 +16,7 @@
       "supportsTablet": true
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon-sivi.png",
         "backgroundColor": "#000000"
