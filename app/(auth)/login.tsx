@@ -11,10 +11,8 @@ import {
   Platform,
   Image,
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { autoLogin } from '../../services/api';
-import { ADMIN_EMAIL } from '../../constants/config';
 import { useAppStore } from '../../services/store';
 
 export default function LoginScreen() {
@@ -43,20 +41,16 @@ async function handleLogin() {
 
       const { workspace, data } = resultado;
 
-      await setSession(workspace.domain, data.jwt, data.user, workspace);
+      // Invocar setSession con la firma actualizada pasando: domain, token, jwt, user, workspace, sessions
+      await setSession(workspace.domain, data.token, data.jwt, data.user, workspace, data.sessions);
 
       setStatus(`Conectado a ${workspace.name}`);
 
-      const isAdmin = data.user?.role?.name === 'SuperAdmin';
+      // Todos van al dashboard. El enrutador interno del dashboard se encarga de mostrar la vista correcta según el rol y la personificación.
+      router.replace('/(tabs)/dashboard');
 
-      if (isAdmin) {
-        router.replace('/(admin)/workspaces');
-      } else {
-        router.replace('/(tabs)/dashboard');
-      }
-
-    } catch (error) {
-      Alert.alert('Error', 'No se pudo conectar. Verifica tu conexión.');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo conectar. Verifica tu conexión.');
     } finally {
       setLoading(false);
       setStatus('');

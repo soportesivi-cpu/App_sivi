@@ -1,0 +1,282 @@
+openapi: 3.0.0
+info:
+  title: Sivi (Alice Guardian) API
+  description: |
+    Documentación simplificada de los endpoints que consume la aplicación móvil Sivi.
+    Esta API gestiona alertas de seguridad, videovigilancia y reconocimiento facial.
+  version: 1.0.0
+servers:
+  - url: https://{domain}/api/v1
+    description: Servidor del Workspace Activo (Ej. control.guardian.imperium.pe)
+    variables:
+      domain:
+        default: control.guardian.imperium.pe
+        description: El dominio asignado al cliente.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      summary: Iniciar Sesión
+      description: Autentica a un usuario y devuelve un Token JWT. No requiere token para consumirse.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: admin@dominio.com
+                password:
+                  type: string
+                  example: "123456"
+      responses:
+        '200':
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jwt:
+                    type: string
+                  userData:
+                    type: object
+        '401':
+          description: Credenciales inválidas
+  /alerts/:
+    get:
+      summary: Obtener Alertas
+      description: Devuelve la lista paginada de alertas de seguridad del sistema.
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Lista de alertas
+  /device/:
+    get:
+      summary: Obtener Dispositivos (Cámaras)
+      description: Devuelve la lista paginada de cámaras conectadas.
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Lista de cámaras
+  /face/:
+    get:
+      summary: Obtener Detecciones Faciales
+      description: Historial de rostros detectados por las cámaras.
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Detecciones faciales
+  /face/trained/all:
+    get:
+      summary: Obtener Rostros Entrenados
+      description: Lista de personas autorizadas o registradas en el sistema.
+      responses:
+        '200':
+          description: Rostros conocidos
+  /motion/:
+    get:
+      summary: Obtener Alertas de Movimiento
+      description: Historial de eventos donde se detectó movimiento.
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Eventos de movimiento
+  /mobile/v1/dashboard:
+    get:
+      summary: BFF Dashboard Mobile
+      description: Endpoint optimizado para la app móvil. Combina todas las métricas, estado de cámaras y últimas alertas en una sola petición.
+      parameters:
+        - in: query
+          name: work_id
+          schema:
+            type: string
+          description: ID del workspace para suplantación (SuperAdmin). Si no se provee, se asume el workspace del token.
+      responses:
+        '200':
+          description: Estructura exacta que espera el UI móvil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspace_name:
+                    type: string
+                    example: "Guardian Workspace"
+                  user:
+                    type: object
+                    properties:
+                      role_badge:
+                        type: string
+                        example: "ADM"
+                      avatar_url:
+                        type: string
+                        example: "https://lh3.googleusercontent.com/..."
+                  summary:
+                    type: object
+                    properties:
+                      cameras:
+                        type: object
+                        properties:
+                          online:
+                            type: integer
+                            example: 7
+                          offline:
+                            type: integer
+                            example: 2
+                      storage:
+                        type: object
+                        properties:
+                          percentage:
+                            type: integer
+                            example: 30
+                          estimated_days_left:
+                            type: integer
+                            example: 45
+                  alerts_24h:
+                    type: object
+                    properties:
+                      face:
+                        type: integer
+                        example: 58
+                      lpr:
+                        type: integer
+                        example: 31
+                      object:
+                        type: integer
+                        example: 22
+                      intrusion:
+                        type: integer
+                        example: 18
+                  operation_metrics:
+                    type: object
+                    properties:
+                      total_alerts:
+                        type: integer
+                        example: 30
+                      resolved:
+                        type: integer
+                        example: 4
+                      unresolved:
+                        type: integer
+                        example: 20
+                      effective_percentage:
+                        type: number
+                        example: 33.33
+                  recent_alerts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "alert-123"
+                        title:
+                          type: string
+                          example: "Intrusión Perímetro Sur"
+                        timestamp:
+                          type: string
+                          example: "14:32:05"
+                        camera_name:
+                          type: string
+                          example: "CAM-EXT-04"
+                        tag_value:
+                          type: string
+                          example: "98%"
+                        type:
+                          type: string
+                          enum: [intrusion, lpr, system]
+                        thumbnail_url:
+                          type: string
+                          example: "https://..."
+  /mobile/v1/superadmin/dashboard:
+    get:
+      summary: BFF Dashboard SuperAdmin Mobile
+      description: Endpoint optimizado para la app móvil para SuperAdmins. Devuelve las métricas globales y la lista de workspaces.
+      responses:
+        '200':
+          description: Estructura JSON para la pantalla de SuperAdmin.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  global:
+                    type: object
+                    properties:
+                      totalWorkspaces:
+                        type: integer
+                        example: 14
+                      newThisMonth:
+                        type: integer
+                        example: 2
+                      totalCameras:
+                        type: integer
+                        example: 842
+                      uptime:
+                        type: string
+                        example: "98.5%"
+                  instances:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "1"
+                        initials:
+                          type: string
+                          example: "C1"
+                        name:
+                          type: string
+                          example: "Demo 1"
+                        domain:
+                          type: string
+                          example: "corp1.imperium.pe"
+                        plan:
+                          type: string
+                          enum: [PRO, LITE, ENT]
+                          example: "PRO"
+                        work_id:
+                          type: string
+                          example: "WRK-001-A"
+                        status:
+                          type: string
+                          enum: [Active, Inactive]
+                          example: "Active"
+                        users:
+                          type: integer
+                          example: 45
+                        cameras:
+                          type: integer
+                          example: 120

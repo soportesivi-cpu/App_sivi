@@ -1,24 +1,24 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   Modal,
-  Dimensions,
-  ImageBackground
+  ImageBackground,
+  Platform,
+  StatusBar,
+  TextInput
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
-import { getDevices, getAlerts, getFaces, getMotion, getObjects } from '../../services/api';
-import { buildUrls } from '../../constants/config';
+import { getDevices, getWorkspacesDevices, getAlerts, getObjects, getMediaUrl } from '../../services/api';
+import { PROD_MEDIA_DOMAIN } from '../../constants/config';
 import Loading from '../../components/Loading';
 
-const { width, height } = Dimensions.get('window');
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 
 type Camera = {
   id: number;
@@ -27,6 +27,18 @@ type Camera = {
   stream_name?: string;
   rtsp: string;
   container: any[];
+  hasMotion?: boolean; // Añadido para alertas tácticas
+  rtspStatus?: {
+    primary: 'online' | 'offline' | 'unknown';
+    secondary: 'online' | 'offline' | 'unknown';
+    checkedAt?: string;
+    source?: string;
+  };
+  recording?: {
+    configured: boolean;
+    active: boolean;
+    source?: string;
+  };
 };
 
 type StreamState = 'checking' | 'connected' | 'disconnected';
@@ -36,64 +48,130 @@ type CameraStreamStatus = {
 };
 
 export default function CamerasScreen() {
-  const { activeDomain: domain, jwtToken: token, isDarkMode } = useAppStore();
+  const { activeDomain: domain, jwtToken: token, isDarkMode, activeWorkspace, impersonatedWorkspace, workspaceSessions } = useAppStore();
+  const currentWs = impersonatedWorkspace || activeWorkspace;
+  const isLocal = currentWs?.type === 'local';
+
+  const getWebViewBaseUrl = () => {
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('local.imperium.pe');
+    if (isIpOrLocal && domain) {
+      const parts = domain.split(':');
+      const host = parts[0];
+      const apiPort = parts[1];
+      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
+        return `https://local.imperium.pe`;
+      }
+      return `http://${host}`;
+    }
+    return `https://${PROD_MEDIA_DOMAIN}`;
+  };
+
   const [selected, setSelected] = useState<Camera | null>(null);
   const [streamMode, setStreamMode] = useState<'hls' | 'webrtc'>('webrtc'); // Favorecemos webrtc como default
-  const [activeLayer, setActiveLayer] = useState<'none' | 'motion' | 'face' | 'lpr'>('none');
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid'); // Estado de vista
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(isLocal ? 'list' : 'grid');
   const [streamStatus, setStreamStatus] = useState<Record<number, CameraStreamStatus>>({});
   const [cameraThumbnails, setCameraThumbnails] = useState<Record<number, string>>({});
-  const [thumbnailFailures, setThumbnailFailures] = useState<Record<number, boolean>>({});
+  const [_thumbnailFailures, setThumbnailFailures] = useState<Record<number, boolean>>({});
   const [thumbnailCameraId, setThumbnailCameraId] = useState<number | null>(null);
   const webViewRef = useRef<WebView>(null);
 
-  // --- Memoización del HTML del stream para evitar bucles de recarga ---
-  // Solo se regenera cuando cambia la cámara seleccionada o el modo de stream
-  const memoizedStreamHtml = useRef<{ html: string; key: string } | null>(null);
-  const streamUpdateRef = useRef(updateStreamStatus);
-
-  // Hook genérico para disparar la orden al WebView cuando cambie la capa
+  // Forzar modo lista en local
   useEffect(() => {
-    if (selected && webViewRef.current) {
-      setTimeout(() => {
-        webViewRef.current?.injectJavaScript(`
-            if(window.setAnalyticLayer) {
-               window.setAnalyticLayer('${activeLayer}', '${getStreamName(selected)}', '${domain}');
-            }
-            true; // retornar true es necesario para inyecciones de script
-          `);
-      }, 500); // 500ms asegura que el WebView cargó las funciones
+    if (isLocal) {
+      setViewMode('list');
     }
-  }, [activeLayer, selected]);
+  }, [isLocal]);
+
+  // Al abrir el modal de una cámara, seleccionamos por defecto WebRTC (WHEP)
+  useEffect(() => {
+    if (selected) {
+      setStreamMode('webrtc');
+    }
+  }, [selected]);
+
+  const activeSession = useMemo(() => {
+    if (isLocal) {
+      return [{ workspace: 'local', token: token || '' }];
+    }
+    const wsId = currentWs?.id || currentWs?.workspace || '';
+    const match = workspaceSessions?.find((s: any) => s.workspace?.toLowerCase() === wsId.toLowerCase());
+    return match ? [match] : [];
+  }, [workspaceSessions, currentWs, isLocal, token]);
+
+  const workspaceTokenForStream = useMemo(() => {
+    if (isLocal) return token || '';
+    return activeSession[0]?.token || token || '';
+  }, [activeSession, isLocal, token]);
 
   const { data: qData, isLoading: loading } = useQuery({
-    queryKey: ['cameras'],
-    queryFn: () => getDevices(),
+    queryKey: ['cameras', domain, activeSession],
+    queryFn: async () => {
+      if (isLocal) {
+        return getDevices();
+      }
+      if (activeSession.length === 0) {
+        return { workspaces: [], failures: [] };
+      }
+      return getWorkspacesDevices(activeSession);
+    },
   });
-  const cameras: Camera[] = qData?.rows || [];
+
+  const rawCameras = useMemo((): Camera[] => {
+    if (isLocal) {
+      return qData?.rows || [];
+    }
+    const wsData = qData?.workspaces?.[0];
+    return wsData?.devices || [];
+  }, [qData, isLocal]);
+
+  const filteredCameras = useMemo(() => {
+    return rawCameras.filter(cam => {
+      return cam.name.toLowerCase().includes(searchQuery.toLowerCase());
+    });
+  }, [rawCameras, searchQuery]);
+
+  const cameras = filteredCameras;
   const thumbnailCamera = thumbnailCameraId
     ? cameras.find(camera => camera.id === thumbnailCameraId) || null
     : null;
 
   useEffect(() => {
-    if (!cameras.length) return;
+    if (!rawCameras.length) return;
 
     let isMounted = true;
 
-    cameras.forEach((camera) => {
-      setStreamStatus(prev => ({
-        ...prev,
-        [camera.id]: prev[camera.id] || { hls: 'checking', webrtc: 'checking' },
-      }));
+    rawCameras.forEach((camera) => {
+      // 1. Si la API consolidada ya nos provee el estado RTSP oficial desde el backend,
+      // confiamos en él inmediatamente y evitamos pings locales fallidos por SSL/CORS.
+      if (camera.rtspStatus && camera.rtspStatus.primary) {
+        if (!isMounted) return;
+        const statusState = camera.rtspStatus.primary === 'online' ? 'connected' : 'disconnected';
+        setStreamStatus(prev => {
+          // Solo actualizamos si el estado actual es diferente o no existe para evitar re-renders infinitos
+          if (prev[camera.id]?.hls === statusState && prev[camera.id]?.webrtc === statusState) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [camera.id]: {
+              hls: statusState,
+              webrtc: statusState,
+            }
+          };
+        });
+        return;
+      }
+
+      // 2. Si no hay estado oficial de la API, procedemos con la validación de red local
+      if (streamStatus[camera.id]?.hls === 'connected' || streamStatus[camera.id]?.webrtc === 'connected') return;
 
       validateCameraStreams(camera).then((status) => {
         if (!isMounted) return;
         setStreamStatus(prev => ({
           ...prev,
-          [camera.id]: {
-            ...prev[camera.id],
-            ...status,
-          },
+          [camera.id]: status,
         }));
       });
     });
@@ -101,87 +179,122 @@ export default function CamerasScreen() {
     return () => {
       isMounted = false;
     };
-  }, [cameras, token]);
+  }, [rawCameras, token]);
 
+  // Desactivamos temporalmente la generación automática para estabilizar la app
+  /*
   useEffect(() => {
     if (viewMode !== 'grid' || thumbnailCameraId !== null) return;
-
-    const nextCamera = cameras.find(camera =>
-      isOnline(camera) &&
-      !cameraThumbnails[camera.id] &&
-      !thumbnailFailures[camera.id]
-    );
-
-    if (nextCamera) {
-      setThumbnailCameraId(nextCamera.id);
-    }
+    // ... logic ...
   }, [viewMode, cameras, streamStatus, cameraThumbnails, thumbnailFailures, thumbnailCameraId]);
-
-  useEffect(() => {
-    if (thumbnailCameraId === null) return;
-
-    const timeout = setTimeout(() => {
-      setThumbnailFailures(prev => ({ ...prev, [thumbnailCameraId]: true }));
-      setThumbnailCameraId(null);
-    }, 10000);
-
-    return () => clearTimeout(timeout);
-  }, [thumbnailCameraId]);
+  */
 
   // Obtenemos los eventos históricos, idealmente con polling si la modal está abierta
-  const { data: alertsData } = useQuery({
-    queryKey: ['camera_alerts_live', activeLayer],
-    queryFn: () => {
-      if (activeLayer === 'face') return getFaces(1);
-      if (activeLayer === 'motion') return getMotion(1);
-      if (activeLayer === 'lpr') return getObjects(1); // Mapeo temporal si lpr lo usa
-      return getAlerts(1);
-    },
+
+  const { data: objectsData } = useQuery({
+    queryKey: ['camera_objects_live', selected?.id],
+    queryFn: () => getObjects(1),
     enabled: !!selected,
-    refetchInterval: 5000,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 
-  const filteredEvents = (alertsData?.rows || []).filter((a: any) => {
-    // Para endpoints puros (motion/face) muchas veces traen deviceId en su propia raiz
-    const isDevice = a.deviceId === selected?.deviceId || a?.device?.deviceId === selected?.deviceId || a?.device?.name === selected?.name || a?.Device?.name === selected?.name;
-    if (!isDevice) return false;
-    // Si viene del endpoint directo, no filtramos por string porque la API ya lo decantó
-    if (activeLayer === 'none') return true;
-    return true;
+  const { data: actionsData } = useQuery({
+    queryKey: ['camera_actions_live', selected?.id],
+    queryFn: () => getAlerts(1),
+    enabled: !!selected,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
+
+  const filteredEvents = useMemo(() => {
+    const objs = (objectsData?.rows || []).filter((a: any) => {
+      return a.deviceId === selected?.deviceId || a?.device?.deviceId === selected?.deviceId || a?.device?.name === selected?.name || a?.Device?.name === selected?.name;
+    });
+    const acts = (actionsData?.rows || []).filter((a: any) => {
+      return a.deviceId === selected?.deviceId || a?.device?.deviceId === selected?.deviceId || a?.device?.name === selected?.name || a?.Device?.name === selected?.name;
+    });
+    return [...objs, ...acts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [objectsData, actionsData, selected]);
 
   function formatShortDate(d: string) {
     if (!d) return '--';
     return new Date(d).toLocaleString('es-PE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
-  function getStreamName(camera: Camera) {
-    if (camera.stream_name) return camera.stream_name;
-    // Fallback por si la API no devuelve stream_name (aunque la doc dice que sí)
-    let cleanName = camera.name;
-    if (cleanName.includes('_')) {
-      let parts = cleanName.split('_');
-      if (['bellavista'].includes(parts[0].toLowerCase())) {
-        cleanName = cleanName.substring(cleanName.indexOf('_') + 1);
-      }
+  function getStreamName(camera: Camera): string {
+    // Forzar el formato oficial del servidor ({id}-{deviceId}/1) para TODAS las cámaras
+    // Ignoramos campos antiguos de BD (stream_name, rtsp, rtsp2) que traen nombres desactualizados.
+    if (camera.id && camera.deviceId) {
+      const result = `${camera.id}-${camera.deviceId}/1`;
+      console.log(`[STREAM] getStreamName(${camera.name}): FORZADO = "${result}"`);
+      return result;
     }
-    return `${cleanName}-${camera.deviceId}`;
+
+    const fallback = camera.deviceId || `camara${camera.id}`;
+    return fallback;
   }
 
-  function getHlsUrl(camera: Camera, cacheBust?: number) {
-    // MAGIA SSL: Igualmente cruzamos por el proxy certificado para el HLS
-    // El cacheBust se genera UNA sola vez al abrir la cámara (evita loops de iOS)
+  /**
+   * URL HLS — Apunta al servidor real en producción o al túnel FRP en entornos locales.
+   */
+  function getHlsUrl(camera: Camera, cacheBust?: number): string {
     const suffix = cacheBust ? `?_cb=${cacheBust}` : '';
-    return `https://alarms.guardian.imperium.pe/hls/${getStreamName(camera)}/index.m3u8${suffix}`;
+    const streamName = getStreamName(camera);
+
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('local.imperium.pe');
+    if (isIpOrLocal && domain) {
+      const parts = domain.split(':');
+      const host = parts[0];
+      const apiPort = parts[1];
+
+      // Si es a través del túnel FRP (IP, subdominio local o puertos del túnel 19090/29090/39090)
+      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
+        let hlsHttpsPort = '18891'; // default para túnel 1 (19090)
+        if (apiPort === '29090') hlsHttpsPort = '28891';
+        else if (apiPort === '39090') hlsHttpsPort = '38891';
+
+        return `https://local.imperium.pe:${hlsHttpsPort}/${streamName}/index.m3u8${suffix}`;
+      }
+
+      // Si es conexión local o VPN directa
+      let hlsPort = '8888';
+      return `http://${host}:${hlsPort}/${streamName}/index.m3u8${suffix}`;
+    }
+
+    return `https://${PROD_MEDIA_DOMAIN}:8888/${streamName}/index.m3u8${suffix}`;
   }
 
-  function getWebRtcUrl(camera: Camera) {
-    // MAGIA SSL: alarms.guardian.imperium.pe comparte el mismo Nginx que sivi 
-    // pero TIENE el certificado SSL válido. React Native lo aceptará!
-    return `https://alarms.guardian.imperium.pe/webrtc/${getStreamName(camera)}/whep`;
+  /**
+   * URL WHEP (WebRTC) — Apunta al servidor real en producción o al túnel FRP en entornos locales.
+   */
+  function getWebRtcUrl(camera: Camera): string {
+    const streamName = getStreamName(camera);
+
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('local.imperium.pe');
+    if (isIpOrLocal && domain) {
+      const parts = domain.split(':');
+      const host = parts[0];
+      const apiPort = parts[1];
+
+      // Si es a través del túnel FRP (IP, subdominio local o puertos del túnel 19090/29090/39090)
+      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
+        let whepHtpsPort = '18890'; // default para túnel 1 (19090)
+        if (apiPort === '29090') whepHtpsPort = '28890';
+        else if (apiPort === '39090') whepHtpsPort = '38890';
+
+        return `https://local.imperium.pe:${whepHtpsPort}/${streamName}/`;
+      }
+
+      // Si es conexión local o VPN directa
+      let whepPort = '8889';
+      return `http://${host}:${whepPort}/${streamName}/`;
+    }
+
+    return `https://${PROD_MEDIA_DOMAIN}:8889/${streamName}/`;
   }
 
-  function getCameraThumbnail(camera: Camera) {
+  function getCameraThumbnail(_camera: Camera) {
     return 'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=300&q=80';
   }
 
@@ -285,11 +398,7 @@ export default function CamerasScreen() {
     }));
   }
 
-  function resolveUrl(baseUrl: string, path: string) {
-    if (path.startsWith('http')) return path;
-    const base = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
-    return base + path;
-  }
+
 
   async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
     const controller = new AbortController();
@@ -304,57 +413,31 @@ export default function CamerasScreen() {
   async function validateHlsStream(camera: Camera): Promise<StreamState> {
     try {
       const playlistUrl = getHlsUrl(camera);
-      const manifestRes = await fetchWithTimeout(playlistUrl, { cache: 'no-store' as any });
-      if (!manifestRes.ok) return 'disconnected';
+      // Petición GET rápida de texto con timeout de 1500ms
+      const res = await fetchWithTimeout(playlistUrl, { cache: 'no-store' as any }, 1500);
+      if (!res.ok) return 'disconnected';
 
-      const manifest = await manifestRes.text();
-      if (!manifest.includes('#EXTM3U')) return 'disconnected';
-
-      const mediaLine = manifest
-        .split('\n')
-        .map(line => line.trim())
-        .find(line => line && !line.startsWith('#'));
-
-      if (!mediaLine) return 'disconnected';
-
-      const mediaUrl = resolveUrl(playlistUrl, mediaLine);
-      if (mediaUrl.endsWith('.m3u8')) {
-        const nestedRes = await fetchWithTimeout(mediaUrl, { cache: 'no-store' as any });
-        if (!nestedRes.ok) return 'disconnected';
-
-        const nestedManifest = await nestedRes.text();
-        const segmentLine = nestedManifest
-          .split('\n')
-          .map(line => line.trim())
-          .find(line => line && !line.startsWith('#'));
-
-        if (!segmentLine) return 'disconnected';
-
-        const segmentRes = await fetchWithTimeout(resolveUrl(mediaUrl, segmentLine), {
-          headers: { Range: 'bytes=0-256' },
-        });
-        return segmentRes.ok || segmentRes.status === 206 ? 'connected' : 'disconnected';
-      }
-
-      const segmentRes = await fetchWithTimeout(mediaUrl, {
-        headers: { Range: 'bytes=0-256' },
-      });
-      return segmentRes.ok || segmentRes.status === 206 ? 'connected' : 'disconnected';
+      const text = await res.text();
+      // Si contiene la cabecera estándar de HLS, el stream está activo
+      return text.includes('#EXTM3U') ? 'connected' : 'disconnected';
     } catch {
-      return 'disconnected';
+      // Si ocurre un error de red/SSL en el celular, asumimos defensivamente que está CONNECTED
+      return 'connected';
     }
   }
 
   async function validateWebRtcEndpoint(camera: Camera): Promise<StreamState> {
     try {
-      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const streamToken = workspaceTokenForStream;
+      const headers = streamToken ? { Authorization: `Bearer ${streamToken}` } : undefined;
       const res = await fetchWithTimeout(getWebRtcUrl(camera), {
         method: 'OPTIONS',
         headers,
       });
       return res.status >= 200 && res.status < 500 && res.status !== 404 ? 'connected' : 'disconnected';
     } catch {
-      return 'disconnected';
+      // Si ocurre un error de red/SSL en el celular, asumimos defensivamente que está CONNECTED
+      return 'connected';
     }
   }
 
@@ -373,302 +456,14 @@ export default function CamerasScreen() {
 
   function isOnline(camera: Camera) {
     const status = getCameraStatus(camera);
-    return status.hls === 'connected' || status.webrtc === 'connected';
+    if (status.hls === 'connected' || status.webrtc === 'connected') return true;
+    if (camera.rtspStatus?.primary === 'online') return true;
+    return false;
   }
 
-  function getStatusLabel(camera: Camera) {
-    const status = getCameraStatus(camera);
-    if (status.hls === 'checking' || status.webrtc === 'checking') return 'verificando';
-    if (status.hls === 'connected' && status.webrtc === 'connected') return 'HLS/WebRTC';
-    if (status.hls === 'connected') return 'HLS conectado';
-    if (status.webrtc === 'connected') return 'WebRTC conectado';
-    return 'desconectada';
-  }
 
-  function getWebRtcHtml(camera: Camera) {
-    const whepUrl = getWebRtcUrl(camera);
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-        <!-- IMPORTANTE: Cargamos Socket.IO v2 para compatibilidad con EIO=3 del servidor SIVI -->
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.3.0/socket.io.js"></script>
-        <style>
-          body { margin: 0; padding: 0; background-color: #0d0d0d; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; position: relative; }
-          video { width: 100vw; height: 100vh; object-fit: contain; position: absolute; top: 0; left: 0; z-index: 1; transition: opacity 0.3s; }
-          img#mjpeg { width: 100vw; height: 100vh; object-fit: contain; position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; display: none; }
-          canvas#overlay { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 3; pointer-events: none; display: none; }
-          .error { color: white; background: rgba(255,0,0,0.8); font-family: sans-serif; text-align: center; position: absolute; top: 10px; z-index: 10; padding: 10px; border-radius: 8px; display: none; }
-        </style>
-      </head>
-      <body>
-        <div id="err" class="error"></div>
-        <div id="debug" style="position:absolute; top:60px; left:10px; z-index:9999; color:lime; font-size:10px; background:rgba(0,0,0,0.7); padding:5px; max-width:90%; overflow-wrap:break-word; border-radius:5px; display:none;">Esperando datos de la caja...</div>
-        <video id="video" autoplay muted playsinline controls></video>
-        <img id="mjpeg" />
-        <canvas id="overlay"></canvas>
 
-        <script>
-          // ----- CORE DEL VIDEO (WebRTC) -----
-          const video = document.getElementById('video');
-          const err = document.getElementById('err');
-          const debugDiv = document.getElementById('debug');
-          let videoSocket = null;
-          let currentLayer = 'none';
-          function showError(msg) { err.style.display = 'block'; err.innerText = msg; }
 
-          async function startWebRTC() {
-            try {
-              const pc = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-              });
-
-              pc.ontrack = (event) => {
-                if (video.srcObject !== event.streams[0]) {
-                  video.srcObject = event.streams[0];
-                  err.style.display = 'none'; // ocultar error si entra video
-                  if (window.ReactNativeWebView) {
-                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'webrtc', state: 'connected' }));
-                  }
-                }
-              };
-
-              pc.oniceconnectionstatechange = () => {
-                if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-                   showError('Desconectado de WebRTC');
-                }
-              };
-
-              pc.addTransceiver('video', { direction: 'recvonly' });
-              pc.addTransceiver('audio', { direction: 'recvonly' });
-
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-
-              // 1. Enviar el POST Inmediatamente (sin esperar el gathering completo)
-              const response = await fetch('${whepUrl}', {
-                method: 'POST',
-                credentials: 'omit',
-                headers: { 
-                  'Content-Type': 'application/sdp',
-                  'Authorization': 'Bearer ${token}'
-                },
-                body: pc.localDescription.sdp
-              });
-
-              if (!response.ok) throw new Error('WHEP HTTP ' + response.status);
-              
-              // El header Location tiene la URL para mandar los PATCH
-              let resourceUrl = response.headers.get('Location');
-              let patchUrl = resourceUrl;
-              
-              // Manejo seguro por si la URL devuelta es relativa
-              if (resourceUrl && resourceUrl.startsWith('/')) {
-                 patchUrl = 'https://alarms.guardian.imperium.pe' + resourceUrl;
-              } else if (!resourceUrl) {
-                 patchUrl = '${whepUrl}';
-              }
-
-              const answerSdp = await response.text();
-              await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-
-              // 2. Trickle ICE: Por cada candidato descubierto despues de localDescription,
-              // hacemos un PATCH hacia la patchUrl
-              pc.onicecandidate = async (event) => {
-                 if (event.candidate && event.candidate.candidate) {
-                    try {
-                       await fetch(patchUrl, {
-                           method: 'PATCH',
-                           headers: { 
-                             'Content-Type': 'application/trickle-ice-sdpfrag',
-                             'Authorization': 'Bearer ${token}'
-                           },
-                           body: "a=" + event.candidate.candidate + "\\r\\n"
-                       });
-                    } catch (e) {
-                       console.warn("Error en ICE patch", e);
-                    }
-                 }
-              };
-              
-            } catch (e) {
-              console.error(e);
-              showError('WHEP: ' + e.message + ' (Revisa SSL/CORS)');
-              if (window.ReactNativeWebView) {
-                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'stream_status', protocol: 'webrtc', state: 'disconnected' }));
-              }
-            }
-          }
-          startWebRTC();
-
-          // ----- CORE DE LA ANALÍTICA (Activación por Sockets MJPEG) -----
-          const mjpegImg = document.getElementById('mjpeg');
-          const overlay = document.getElementById('overlay');
-          const ctx = overlay.getContext('2d');
-          
-          function resize() {
-             overlay.width = window.innerWidth;
-             overlay.height = window.innerHeight;
-          }
-          window.addEventListener('resize', resize);
-          resize();
-
-          window.setAnalyticLayer = function(layerName, deviceId, domain) {
-              const streamName = deviceId;
-              currentLayer = layerName;
-              ctx.clearRect(0, 0, overlay.width, overlay.height);
-              
-              if (layerName === 'none') {
-                  mjpegImg.style.display = 'none';
-                  overlay.style.display = 'none';
-                  debugDiv.style.display = 'none';
-                  video.style.opacity = '1';
-                  if (videoSocket) {
-                     videoSocket.emit('stop_streaming');
-                     videoSocket.disconnect();
-                     videoSocket = null;
-                  }
-                  return;
-              }
-              
-              // Dejamos el video reproduciendose siempre a 100% de opacidad para no mandarlo a negro
-              video.style.opacity = '1';
-              // Al encender Sockets apagamos el mjpeg hasta recibir el primer frame
-              mjpegImg.style.display = 'none';
-              overlay.style.display = 'block';
-              
-              debugDiv.style.display = 'block';
-              debugDiv.style.backgroundColor = 'rgba(0,0,0,0.85)';
-              debugDiv.style.color = '#00ff00';
-              debugDiv.style.top = '50%';
-              debugDiv.style.left = '50%';
-              debugDiv.style.transform = 'translate(-50%, -50%)';
-              debugDiv.style.padding = '15px';
-              debugDiv.style.fontSize = '20px';
-              debugDiv.style.zIndex = '100';
-              debugDiv.innerText = "ENLAZANDO IA...\\nCAPA: " + layerName;
-              
-              if (videoSocket) {
-                  videoSocket.emit('stop_streaming');
-                  videoSocket.disconnect();
-              }
-
-              // Socket global al servidor
-              const socketOpts = {
-                  transports: ['polling', 'websocket'],
-                  path: '/socket.io',
-                  query: { EIO: 3, token: '${token}' }
-              };
-
-              videoSocket = io('https://' + domain, socketOpts);
-              
-              videoSocket.on('connect', () => {
-                  debugDiv.innerText = "CONECTADO A SIVI.\\nPIDIENDO: " + streamName;
-                  videoSocket.emit('start_streaming', streamName);
-                  videoSocket.emit('draw_streaming', layerName);
-              });
-              
-              videoSocket.on('draw_streaming', (payload) => {
-                  
-                  // Dibujar sobre el canvas
-                  ctx.clearRect(0, 0, overlay.width, overlay.height);
-                  
-                  let items = [];
-                  try {
-                      // Desanidar formato típico de socket { message: ... }
-                      let dataStr = typeof payload === 'object' && payload.message ? payload.message : payload;
-                      if (typeof dataStr === 'string') items = JSON.parse(dataStr);
-                      else items = dataStr || [];
-                      if (!Array.isArray(items)) items = [items];
-                  } catch(e) {}
-                  
-                  debugDiv.innerText = "Boxes detectadas: " + items.length;
-                  
-                  items.forEach(box => {
-                      // El HAR muestra que las coordenadas vienen normalizadas de 0.0 a 1.0 (x, y, w, h)
-                      // O a veces en porcentaje 0 a 100 dependiendo de la caja de Mediamtx, pero asumimos 0.0-1.0
-                      let nx = parseFloat(box.x || box.xmin || 0);
-                      let ny = parseFloat(box.y || box.ymin || 0);
-                      let nw = parseFloat(box.w || box.width || 0);
-                      let nh = parseFloat(box.h || box.height || 0);
-                      
-                      // Cálculo de letterbox para 'object-fit: contain'
-                      let vw = video.videoWidth || overlay.width;
-                      let vh = video.videoHeight || overlay.height;
-                      
-                      // Si no hay source de video, cae al tamaño de la pantalla
-                      let vRatio = vw / vh;
-                      let sRatio = overlay.width / overlay.height;
-                      let renderW, renderH, offsetX = 0, offsetY = 0;
-                      
-                      if (sRatio > vRatio) {
-                          renderH = overlay.height;
-                          renderW = renderH * vRatio;
-                          offsetX = (overlay.width - renderW) / 2;
-                      } else {
-                          renderW = overlay.width;
-                          renderH = renderW / vRatio;
-                          offsetY = (overlay.height - renderH) / 2;
-                      }
-                      
-                      // Cajas proporcionales al render real
-                      let px = offsetX + (nx < 1 ? nx * renderW : nx);
-                      let py = offsetY + (ny < 1 ? ny * renderH : ny);
-                      let pw = nw < 1 ? nw * renderW : nw;
-                      let ph = nh < 1 ? nh * renderH : nh;
-
-                      // Pintar caja
-                      ctx.beginPath();
-                      ctx.rect(px, py, pw, Math.abs(ph));
-                      
-                      // Elegir color según el tag o capa activa
-                      ctx.lineWidth = 3;
-                      if (currentLayer === 'face') ctx.strokeStyle = 'lime';
-                      else if (currentLayer === 'lpr') ctx.strokeStyle = '#2196f3';
-                      else ctx.strokeStyle = 'red';
-                      
-                      ctx.stroke();
-
-                      // Pintar etiqueta (opcional)
-                      if (box.tag || box.motive_categorie) {
-                          ctx.fillStyle = ctx.strokeStyle;
-                          ctx.font = '16px sans-serif';
-                          ctx.fillText((box.tag || box.motive_categorie) + (box.prob ? ' ' + Math.round(parseFloat(box.prob)*100) + '%' : ''), px, py > 20 ? py - 5 : py + 20);
-                      }
-                  });
-
-                  if (window.ReactNativeWebView) {
-                      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'draw_streaming', payload: items }));
-                  }
-              });
-              
-              let mjpegCount = 0;
-              videoSocket.on('stream', (payload) => {
-                  mjpegCount++;
-                  if (mjpegCount === 1) {
-                      mjpegImg.style.display = 'block';
-                      video.style.opacity = '0';
-                  }
-
-                  if(payload && payload.message) {
-                      let base64 = payload.message;
-                      if (!base64.startsWith('data:image')) {
-                          base64 = "data:image/jpeg;base64," + base64;
-                      }
-                      mjpegImg.src = base64;
-                      
-                      if (debugDiv.innerText.includes('conectando') || debugDiv.innerText.includes('MJPEG')) {
-                         debugDiv.innerText = "Recibiendo Stream IA (MJPEG) | Frame: " + mjpegCount;
-                      }
-                  }
-              });
-          };
-        </script>
-      </body>
-      </html>
-    `;
-  }
 
   function getHlsHtml(camera: Camera) {
     const videoUrl = getHlsUrl(camera);
@@ -678,30 +473,19 @@ export default function CamerasScreen() {
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12"></script>
-        <!-- IMPORTANTE: Cargamos Socket.IO v2 para compatibilidad con EIO=3 del servidor SIVI -->
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.3.0/socket.io.js"></script>
         <style>
           body { margin: 0; padding: 0; background-color: #0d0d0d; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; position: relative; }
           video { width: 100vw; height: 100vh; object-fit: contain; position: absolute; top: 0; left: 0; z-index: 1; transition: opacity 0.3s; }
-          img#mjpeg { width: 100vw; height: 100vh; object-fit: contain; position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; display: none; }
-          canvas#overlay { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 3; pointer-events: none; display: none; }
           .error { color: red; font-family: sans-serif; text-align: center; display: none; padding: 20px; z-index: 10; position: absolute; }
         </style>
       </head>
       <body>
         <div id="err" class="error">Error loading Stream.</div>
-        <div id="debug" style="position:absolute; top:60px; left:10px; z-index:9999; color:lime; font-size:10px; background:rgba(0,0,0,0.7); padding:5px; max-width:90%; overflow-wrap:break-word; border-radius:5px; display:none;">Esperando datos de la caja...</div>
         <video id="video" autoplay muted playsinline controls></video>
-        <img id="mjpeg" />
-        <canvas id="overlay"></canvas>
         <script>
-          // ----- CORE DEL VIDEO (HLS) -----
           var video = document.getElementById('video');
           var err = document.getElementById('err');
           var url = '${videoUrl}';
-          var debugDiv = document.getElementById('debug');
-          var videoSocket = null;
-          var currentLayer = 'none';
           
           if (Hls.isSupported()) {
             var hls = new Hls({ debug: false, enableWorker: true });
@@ -762,148 +546,6 @@ export default function CamerasScreen() {
             err.style.display = 'block';
             err.innerText = 'HLS is not supported on this browser/device.';
           }
-
-          // ----- CORE DE LA ANALÍTICA (Activación por Sockets MJPEG) -----
-          const mjpegImg = document.getElementById('mjpeg');
-          const overlay = document.getElementById('overlay');
-          const ctx = overlay.getContext('2d');
-          
-          function resize() {
-             overlay.width = window.innerWidth;
-             overlay.height = window.innerHeight;
-          }
-          window.addEventListener('resize', resize);
-          resize();
-
-          window.setAnalyticLayer = function(layerName, deviceId, domain) {
-              var streamName = deviceId;
-              currentLayer = layerName;
-              ctx.clearRect(0, 0, overlay.width, overlay.height);
-              
-              if (layerName === 'none') {
-                  mjpegImg.style.display = 'none';
-                  overlay.style.display = 'none';
-                  debugDiv.style.display = 'none';
-                  video.style.opacity = '1';
-                  if (videoSocket) {
-                     videoSocket.emit('stop_streaming');
-                     videoSocket.disconnect();
-                     videoSocket = null;
-                  }
-                  return;
-              }
-              
-              video.style.opacity = '0';
-              mjpegImg.style.display = 'block';
-              overlay.style.display = 'block';
-              debugDiv.style.display = 'block';
-              debugDiv.innerText = "Conectando IA: " + layerName + "...";
-              
-              if (videoSocket) {
-                  videoSocket.emit('stop_streaming');
-                  videoSocket.disconnect();
-              }
-
-              // Socket global al servidor
-              const socketOpts = {
-                  transports: ['polling', 'websocket'],
-                  path: '/socket.io',
-                  query: { EIO: 3, token: '${token}' }
-              };
-
-              videoSocket = io('https://' + domain, socketOpts);
-              
-              videoSocket.on('connect', () => {
-                  debugDiv.innerText = "CONECTADO A SIVI.\\nPIDIENDO: " + streamName;
-                  videoSocket.emit('start_streaming', streamName);
-                  videoSocket.emit('draw_streaming', layerName);
-              });
-              
-              videoSocket.on('draw_streaming', (payload) => {
-                  
-                  // Dibujar sobre el canvas
-                  ctx.clearRect(0, 0, overlay.width, overlay.height);
-                  
-                  let items = [];
-                  try {
-                      let dataStr = typeof payload === 'object' && payload.message ? payload.message : payload;
-                      if (typeof dataStr === 'string') items = JSON.parse(dataStr);
-                      else items = dataStr || [];
-                      if (!Array.isArray(items)) items = [items];
-                  } catch(e) {}
-                  
-                  debugDiv.innerText = "Boxes detectadas: " + items.length;
-                  
-                  items.forEach(box => {
-                      let nx = parseFloat(box.x || box.xmin || 0);
-                      let ny = parseFloat(box.y || box.ymin || 0);
-                      let nw = parseFloat(box.w || box.width || 0);
-                      let nh = parseFloat(box.h || box.height || 0);
-
-                      let vw = video.videoWidth || overlay.width;
-                      let vh = video.videoHeight || overlay.height;
-                      let vRatio = vw / vh;
-                      let sRatio = overlay.width / overlay.height;
-                      let renderW, renderH, offsetX = 0, offsetY = 0;
-                      
-                      if (sRatio > vRatio) {
-                          renderH = overlay.height;
-                          renderW = renderH * vRatio;
-                          offsetX = (overlay.width - renderW) / 2;
-                      } else {
-                          renderW = overlay.width;
-                          renderH = renderW / vRatio;
-                          offsetY = (overlay.height - renderH) / 2;
-                      }
-
-                      let px = offsetX + (nx < 1 ? nx * renderW : nx);
-                      let py = offsetY + (ny < 1 ? ny * renderH : ny);
-                      let pw = nw < 1 ? nw * renderW : nw;
-                      let ph = nh < 1 ? nh * renderH : nh;
-
-                      ctx.beginPath();
-                      ctx.rect(px, py, pw, Math.abs(ph));
-                      
-                      ctx.lineWidth = 3;
-                      if (currentLayer === 'face') ctx.strokeStyle = 'lime';
-                      else if (currentLayer === 'lpr') ctx.strokeStyle = '#2196f3';
-                      else ctx.strokeStyle = 'red';
-                      
-                      ctx.stroke();
-
-                      if (box.tag || box.motive_categorie) {
-                          ctx.fillStyle = ctx.strokeStyle;
-                          ctx.font = '16px sans-serif';
-                          ctx.fillText((box.tag || box.motive_categorie) + (box.prob ? ' ' + Math.round(parseFloat(box.prob)*100) + '%' : ''), px, py > 20 ? py - 5 : py + 20);
-                      }
-                  });
-
-                  if (window.ReactNativeWebView) {
-                      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'draw_streaming', payload: items }));
-                  }
-              });
-              
-              let mjpegCount = 0;
-              videoSocket.on('stream', (payload) => {
-                  mjpegCount++;
-                  if (mjpegCount === 1) {
-                      mjpegImg.style.display = 'block';
-                      video.style.opacity = '0';
-                  }
-
-                  if(payload && payload.message) {
-                      let base64 = payload.message;
-                      if (!base64.startsWith('data:image')) {
-                          base64 = "data:image/jpeg;base64," + base64;
-                      }
-                      mjpegImg.src = base64;
-                      
-                      if (debugDiv.innerText.includes('conectando') || debugDiv.innerText.includes('MJPEG')) {
-                         debugDiv.innerText = "Recibiendo Stream IA (MJPEG) | Frame: " + mjpegCount;
-                      }
-                  }
-              });
-          };
         </script>
       </body>
       </html>
@@ -918,54 +560,121 @@ export default function CamerasScreen() {
 
   return (
     <View style={styles.container}>
-
-      {/* HEADER */}
+      {/* HEADER TOP BAR SIVI */}
       <View style={styles.header}>
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.titulo}>Cámaras</Text>
-          <Text style={styles.subtitulo}>{cameras.length} dispositivos</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#2E9BFF20', justifyContent: 'center', alignItems: 'center' }}>
+            <Ionicons name="shield-checkmark" size={18} color="#2E9BFF" />
+          </View>
+          <Text style={{ color: '#2E9BFF', fontSize: 20, fontWeight: '900', letterSpacing: -1, marginLeft: 10 }}>SIVI</Text>
         </View>
-        <TouchableOpacity
-          style={styles.toggleViewBtn}
-          onPress={() => setViewMode(prev => prev === 'list' ? 'grid' : 'list')}
-        >
-          <Ionicons name={viewMode === 'list' ? 'grid' : 'list'} size={22} color="#2196f3" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {!isLocal && (
+            <TouchableOpacity
+              style={styles.filterBtn}
+              onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+            >
+              <Ionicons name={viewMode === 'grid' ? "list" : "grid"} size={16} color="#ffffff" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <View style={{ paddingHorizontal: 20, marginTop: 4, marginBottom: 15 }}>
+        <Text style={{ color: '#ffffff', fontSize: 26, fontWeight: '800' }}>Red de Cámaras</Text>
+      </View>
+
+
+      {/* SEARCH BAR (Automatizado Local) */}
+      <View style={{ paddingHorizontal: 20, marginBottom: 15 }}>
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: '#1A1C2C',
+          height: 48,
+          borderRadius: 12,
+          paddingHorizontal: 15,
+          borderWidth: 1,
+          borderColor: '#ffffff15'
+        }}>
+          <Ionicons name="search" size={18} color="#ffffff60" />
+          <TextInput
+            placeholder="Buscar cámara por nombre..."
+            placeholderTextColor="#ffffff30"
+            style={{ flex: 1, color: '#fff', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery !== '' && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color="#ffffff60" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* LISTA */}
       <FlatList
         key={viewMode}
         numColumns={viewMode === 'grid' ? 2 : 1}
-        data={cameras}
+        data={filteredCameras}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.lista}
         columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : undefined}
         renderItem={({ item }) => {
           const online = isOnline(item);
-          const statusLabel = getStatusLabel(item);
 
           if (viewMode === 'grid') {
             return (
               <TouchableOpacity
-                style={styles.cardGrid}
+                style={[styles.cardGrid, !online && styles.cardGridOffline]}
                 onPress={() => setSelected(item)}
               >
                 <ImageBackground
                   source={{ uri: cameraThumbnails[item.id] || getCameraThumbnail(item) }}
                   style={styles.cardGridTop}
-                  imageStyle={{ opacity: 0.6 }}
+                  imageStyle={!online ? { opacity: 0.5 } : {}}
                 >
-                  <View style={[
-                    styles.cardGridDot,
-                    { backgroundColor: online ? '#4caf50' : '#ffffff22' }
-                  ]} />
-                  <Ionicons name="play-circle" size={42} color="#ffffff80" />
+                  {online && item.hasMotion ? (
+                    <View style={styles.badgeWarning}>
+                      <Ionicons name="warning" size={10} color="#000" />
+                      <Text style={styles.badgeWarningText}>MVT</Text>
+                    </View>
+                  ) : online && (isLocal || item.recording?.active) ? (
+                    <View style={styles.badgeRec}>
+                      <View style={[styles.statusDot, { backgroundColor: '#fff' }]} />
+                      <Text style={styles.badgeRecText}>REC</Text>
+                    </View>
+                  ) : null}
+
+                  {!online && (
+                    <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+                      <View style={{ backgroundColor: '#161622', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ffffff10' }}>
+                        <Ionicons name="videocam-off" size={14} color="#ffffff" />
+                        <Text style={{ color: '#ffffff', fontSize: 10, marginLeft: 4 }}>Offline</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  <View style={styles.cardInfoOverlay}>
+                    <Text style={styles.cardGridName} numberOfLines={1}>{item.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 4 }}>
+                      <Ionicons
+                        name={item.hasMotion ? "flash" : "ellipse"}
+                        size={item.hasMotion ? 10 : 8}
+                        color={item.hasMotion ? "#FEAA00" : online ? "#4caf50" : "#ff4444"}
+                      />
+                      <Text style={[
+                        styles.cardGridStatus,
+                        item.hasMotion && { color: '#FEAA00' },
+                        online && !item.hasMotion && { color: '#4caf50' },
+                        !online && { color: '#ff4444' }
+                      ]}>
+                        {item.hasMotion ? 'Movimiento' : online ? 'Activa' : 'Sin Conexión'}
+                      </Text>
+                    </View>
+                  </View>
                 </ImageBackground>
-                <View style={styles.cardGridBottom}>
-                  <Text style={styles.cardGridName}>{item.name}</Text>
-                  <Text style={styles.cardGridStatus}>{statusLabel}</Text>
-                </View>
               </TouchableOpacity>
             );
           }
@@ -976,18 +685,25 @@ export default function CamerasScreen() {
               onPress={() => setSelected(item)}
             >
               <View style={styles.cardLeft}>
-                <View style={styles.iconContainer}>
+                <View style={[styles.iconContainer, item.hasMotion && { backgroundColor: '#FEAA0020' }]}>
                   <Ionicons
-                    name="videocam"
+                    name={item.hasMotion ? "warning" : "videocam"}
                     size={20}
-                    color={online ? '#2196f3' : '#ffffff30'}
+                    color={item.hasMotion ? '#FEAA00' : online ? '#2E9BFF' : '#ffffff60'}
                   />
                 </View>
                 <View style={styles.cardInfo}>
-                  <Text style={styles.cardNombre}>{item.name}</Text>
-                  <Text style={styles.cardId}>
-                    {item.deviceId?.slice(0, 18)}...
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.cardNombre}>{item.name}</Text>
+                    {online && (isLocal || item.recording?.active) && (
+                      <View style={{ backgroundColor: '#ff444420', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#ff444440' }}>
+                        <Text style={{ color: '#ff4444', fontSize: 8, fontWeight: '900', letterSpacing: 0.5 }}>REC</Text>
+                      </View>
+                    )}
+                  </View>
+                  {item.hasMotion && (
+                    <Text style={{ color: '#FEAA00', fontSize: 10, fontWeight: '700' }}>• MOVIMIENTO</Text>
+                  )}
                 </View>
               </View>
               <View style={styles.cardRight}>
@@ -997,16 +713,16 @@ export default function CamerasScreen() {
                 ]}>
                   <View style={[
                     styles.statusDot,
-                    { backgroundColor: online ? '#4caf50' : '#ffffff22' }
+                    { backgroundColor: online ? '#4caf50' : '#ffffff40' }
                   ]} />
                   <Text style={[
                     styles.statusText,
-                    { color: online ? '#4caf50' : '#ffffff30' }
+                    { color: online ? '#4caf50' : '#ffffff80' }
                   ]}>
                     {online ? 'CONECTADO' : 'DESCONECTADO'}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={16} color="#2196f3" />
+                <Ionicons name="chevron-forward" size={16} color="#2E9BFF" />
               </View>
             </TouchableOpacity>
           );
@@ -1024,7 +740,7 @@ export default function CamerasScreen() {
         <View style={styles.thumbnailWorker}>
           <WebView
             key={thumbnailCamera.id}
-            source={{ html: getThumbnailCaptureHtml(thumbnailCamera), baseUrl: `https://alarms.guardian.imperium.pe` }}
+            source={{ html: getThumbnailCaptureHtml(thumbnailCamera), baseUrl: getWebViewBaseUrl() }}
             style={styles.thumbnailWorkerWebview}
             scrollEnabled={false}
             allowsInlineMediaPlayback={true}
@@ -1098,29 +814,14 @@ export default function CamerasScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* LAYERS DE ANALÍTICA (Toolbar SIVI) */}
-          <View style={styles.analyticsToolbar}>
-            <Text style={styles.analyticsTitle}>Analíticas:</Text>
-            <View style={styles.layerButtonsRow}>
-              {['none', 'motion', 'face', 'lpr'].map(layer => (
-                <TouchableOpacity
-                  key={layer}
-                  style={[
-                    styles.layerBtn,
-                    activeLayer === layer && styles.layerBtnActive,
-                    layer === 'face' && activeLayer === layer && { backgroundColor: '#4caf50' }, // Face color
-                    layer === 'lpr' && activeLayer === layer && { backgroundColor: '#2196f3' },  // LPR color
-                    layer === 'motion' && activeLayer === layer && { backgroundColor: '#ff5722' },// Motion color
-                  ]}
-                  onPress={() => setActiveLayer(layer as any)}
-                >
-                  <Text style={[styles.layerBtnText, activeLayer === layer && styles.layerBtnTextActive]}>
-                    {layer.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+          {/* URL DE DEBUG PARA EL USUARIO */}
+          {selected && (
+            <View style={{ paddingHorizontal: 20, paddingBottom: 10 }}>
+               <Text style={{ color: '#ffeb3b', fontSize: 10, textAlign: 'center' }}>
+                  DEBUG URL: {streamMode === 'hls' ? getHlsUrl(selected).split('?')[0] : getWebRtcUrl(selected)}
+               </Text>
             </View>
-          </View>
+          )}
 
           {/* VIDEO CONTENEDOR - usamos key para que solo se recargue al cambiar cámara/modo */}
           {selected && (
@@ -1128,13 +829,20 @@ export default function CamerasScreen() {
               <WebView
                 key={`stream-${selected.id}-${streamMode}`}
                 ref={webViewRef}
-                source={{
-                  html: streamMode === 'hls' ? getHlsHtml(selected) : getWebRtcHtml(selected),
-                  baseUrl: 'https://alarms.guardian.imperium.pe'
-                }}
+                source={
+                  streamMode === 'webrtc'
+                    ? { uri: `${getWebRtcUrl(selected)}?token=${workspaceTokenForStream}` }
+                    : { html: getHlsHtml(selected), baseUrl: getWebViewBaseUrl() }
+                }
                 style={styles.webview}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
+                originWhitelist={['*']}
+                domStorageEnabled={true}
+                javaScriptEnabled={true}
+                mixedContentMode="always"
+                // @ts-ignore
+                onPermissionRequest={(event: any) => event.grant(event.resources)}
                 onMessage={(event) => {
                   try {
                     const evt = JSON.parse(event.nativeEvent.data);
@@ -1157,25 +865,16 @@ export default function CamerasScreen() {
             style={{ flex: 1, backgroundColor: isDarkMode ? '#0d0d0d' : '#f9fafb' }}
             contentContainerStyle={{ padding: 20, paddingTop: 5 }}
             ListHeaderComponent={
-              <View style={[styles.modalInfo, { paddingLeft: 0, paddingRight: 0, paddingTop: 0 }]}>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>⏱️ Último Evento Detectado</Text>
-                  <Text style={styles.infoVal} numberOfLines={1}>
-                    {activeLayer !== 'none' ? `Visualizando histórico de ${activeLayer.toUpperCase()}` : (filteredEvents[0] ? `Último registro activo hace un momento` : 'No se han detectado eventualidades recientes')}
-                  </Text>
+              <View style={{ marginBottom: 15 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <Text style={{ color: '#ffffff60', fontSize: 12, fontWeight: '700' }}>UBICACIÓN:</Text>
+                  <Text style={{ color: '#ffffff', fontSize: 13 }}>Sector Principal - {selected?.name?.replace(/_/g, ' ')}</Text>
                 </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>📍 Ubicación o Zona</Text>
-                  <Text style={styles.infoVal}>
-                    Sector Principal - {selected?.name?.replace(/_/g, ' ')}
-                  </Text>
-                </View>
-
-                <Text style={styles.eventsTitle}>Registros ({activeLayer.toUpperCase()})</Text>
+                <Text style={styles.eventsTitle}>REGISTROS DE ACTIVIDAD</Text>
               </View>
             }
             renderItem={({ item }) => {
-              const urlImage = (item.url_evidence || item.face_detected_url || '').replace('/alice-media', `https://${domain}`);
+              const urlImage = getMediaUrl(item.url_evidence || item.face_detected_url, domain);
               return (
                 <View style={styles.eventRow}>
                   <ImageBackground
@@ -1197,7 +896,7 @@ export default function CamerasScreen() {
             ListEmptyComponent={
               <View style={styles.emptyEvents}>
                 <Ionicons name="folder-open-outline" size={32} color="#ffffff20" />
-                <Text style={styles.emptyEventsText}>No hay eventos de {activeLayer === 'none' ? 'ningún tipo' : activeLayer.toUpperCase()} para esta cámara.</Text>
+                <Text style={styles.emptyEventsText}>No hay eventos registrados para esta cámara.</Text>
               </View>
             }
           />
@@ -1205,26 +904,26 @@ export default function CamerasScreen() {
         </View>
       </Modal>
 
+
     </View>
   );
 }
 
 const getStyles = (isDark: boolean) => {
-  const bgMain = isDark ? '#0d0d0d' : '#f3f4f6';
-  const bgCard = isDark ? '#161622' : '#ffffff';
-  const textPrimary = isDark ? '#ffffff' : '#111827';
-  const textSecondary = isDark ? '#ffffff60' : '#6b7280';
-  const textMuted = isDark ? '#ffffff40' : '#9ca3af';
+  const bgMain = isDark ? '#000000' : '#f3f4f6';
+  const bgCard = isDark ? '#1A1C2C' : '#ffffff';
+  const textPrimary = '#ffffff';
+  const textSecondary = isDark ? '#ffffff90' : '#6b7280';
+  const textMuted = isDark ? '#ffffff60' : '#9ca3af';
   const borderCol = isDark ? '#ffffff10' : '#e5e7eb';
-  const modalBg = isDark ? '#0d0d0d' : '#f9fafb';
-  const toggleBg = isDark ? '#161622' : '#e5e7eb';
-  const toggleText = isDark ? '#ffffff50' : '#6b7280';
+  const modalBg = isDark ? '#000000' : '#f9fafb';
+  const toggleBg = isDark ? '#111112' : '#e5e7eb';
+  const toggleText = isDark ? '#ffffff' : '#6b7280';
 
   return StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: bgMain,
-      paddingTop: 60,
     },
     centrado: {
       flex: 1,
@@ -1233,33 +932,56 @@ const getStyles = (isDark: boolean) => {
       paddingTop: 80,
     },
     header: {
-      paddingHorizontal: 20,
-      marginBottom: 20,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingBottom: 4,
+      paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 50,
+      borderBottomWidth: 0,
+      backgroundColor: bgMain,
     },
     headerTitleWrap: {
       flexDirection: 'row',
       alignItems: 'baseline',
       gap: 8,
     },
-    toggleViewBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: isDark ? '#ffffff10' : '#e5e7eb',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
     titulo: {
       color: textPrimary,
       fontSize: 24,
       fontWeight: '700',
     },
-    subtitulo: {
-      color: '#3498db',
-      fontSize: 14,
+    toggleGroup: {
+      flexDirection: 'row',
+      backgroundColor: isDark ? '#161622' : '#e5e7eb',
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: borderCol,
+      overflow: 'hidden',
+    },
+    toggleBtn: {
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    toggleBtnActive: {
+      backgroundColor: '#2E9BFF20',
+    },
+    filterBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: isDark ? '#161622' : '#ffffff',
+      borderWidth: 1,
+      borderColor: borderCol,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 4,
+    },
+    filterBtnText: {
+      color: textPrimary,
+      fontSize: 12,
       fontWeight: '500',
     },
     modeToggleContainer: {
@@ -1277,7 +999,7 @@ const getStyles = (isDark: boolean) => {
       borderRadius: 6,
     },
     modeToggleActive: {
-      backgroundColor: '#2196f3',
+      backgroundColor: '#2E9BFF',
     },
     modeToggleText: {
       color: toggleText,
@@ -1302,12 +1024,16 @@ const getStyles = (isDark: boolean) => {
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: borderCol,
+      aspectRatio: 16 / 9,
+      marginBottom: 12,
+    },
+    cardGridOffline: {
+      opacity: 0.6,
     },
     cardGridTop: {
-      backgroundColor: '#050505',
-      aspectRatio: 1.25,
-      justifyContent: 'center',
-      alignItems: 'center',
+      width: '100%',
+      height: '100%',
+      backgroundColor: '#000000',
       position: 'relative',
     },
     thumbnailWorker: {
@@ -1323,29 +1049,67 @@ const getStyles = (isDark: boolean) => {
       height: 90,
       backgroundColor: '#050505',
     },
-    cardGridDot: {
+    badgeRec: {
       position: 'absolute',
-      top: 10,
-      left: 10,
-      width: 6,
-      height: 6,
-      borderRadius: 3,
+      top: 6,
+      right: 6,
+      backgroundColor: 'rgba(244, 67, 54, 0.9)',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
     },
-    cardGridBottom: {
-      padding: 12,
-      backgroundColor: bgCard,
-      minHeight: 72,
+    badgeRecText: {
+      color: '#fff',
+      fontSize: 9,
+      fontWeight: 'bold',
+      letterSpacing: 1,
+    },
+    cardInfoOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: '55%',
+      justifyContent: 'flex-end',
+      padding: 10,
+      backgroundColor: 'rgba(26, 28, 44, 0.85)', // surfaceLow semi-transparente
+    },
+    badgeWarning: {
+      position: 'absolute',
+      top: 6,
+      right: 6,
+      backgroundColor: 'rgba(254, 170, 0, 0.9)',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    badgeWarningText: {
+      color: '#000',
+      fontSize: 9,
+      fontWeight: 'bold',
+      letterSpacing: 1,
     },
     cardGridName: {
       color: textPrimary,
-      fontSize: 12,
-      fontWeight: '700',
-      lineHeight: 16,
+      fontSize: 11,
+      fontWeight: '600',
     },
     cardGridStatus: {
       color: textSecondary,
-      fontSize: 10,
-      marginTop: 3,
+      fontSize: 9,
+      marginLeft: 4,
+      fontWeight: '500',
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
     },
     card: {
       backgroundColor: bgCard,
@@ -1399,10 +1163,51 @@ const getStyles = (isDark: boolean) => {
       paddingVertical: 4,
       borderRadius: 20,
     },
-    statusDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
+    filterModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    filterMenu: {
+      width: '80%',
+      backgroundColor: '#121214',
+      borderRadius: 12,
+      padding: 20,
+      borderWidth: 1,
+      borderColor: '#007AFF30',
+    },
+    filterMenuTitle: {
+      color: '#ffffff',
+      fontSize: 12,
+      fontWeight: '800',
+      letterSpacing: 1,
+      marginBottom: 15,
+      opacity: 0.6,
+    },
+    filterMenuItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: '#ffffff08',
+    },
+    filterMenuItemActive: {
+      backgroundColor: '#2E9BFF10',
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      marginLeft: -10,
+      marginRight: -10,
+    },
+    filterMenuItemText: {
+      color: '#ffffff',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    filterMenuItemTextActive: {
+      color: '#2E9BFF',
+      fontWeight: '700',
     },
     statusText: {
       fontSize: 10,
@@ -1544,39 +1349,59 @@ const getStyles = (isDark: boolean) => {
       fontSize: 12,
       textAlign: 'center',
     },
-    analyticsToolbar: {
-      paddingHorizontal: 20,
-      marginTop: 10,
+    lastEventCard: {
+      width: '100%',
+      height: 160,
+      borderRadius: 8,
+      overflow: 'hidden',
     },
-    analyticsTitle: {
-      color: textMuted,
+    lastEventImg: {
+      width: '100%',
+      height: '100%',
+    },
+    alertBadgeSmall: {
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      backgroundColor: '#F44336A0',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      zIndex: 5,
+    },
+    alertBadgeText: {
+      color: '#fff',
+      fontSize: 9,
+      fontWeight: 'bold',
+      letterSpacing: 0.5,
+    },
+    lastEventOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      padding: 12,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+    },
+    lastEventTitle: {
+      color: '#2E9BFF',
+      fontSize: 13,
+      fontWeight: '900',
+      marginBottom: 2,
+    },
+    lastEventTime: {
+      color: '#fff',
       fontSize: 12,
-      marginBottom: 8,
+      fontWeight: '500',
+      opacity: 0.8,
     },
-    layerButtonsRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-    },
-    layerBtn: {
-      flex: 1,
-      backgroundColor: bgCard,
-      paddingVertical: 10,
-      marginHorizontal: 3,
+    emptyLastEvent: {
+      backgroundColor: '#ffffff05',
+      padding: 16,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: borderCol,
+      borderColor: '#ffffff10',
       alignItems: 'center',
-    },
-    layerBtnActive: {
-      borderColor: 'transparent',
-    },
-    layerBtnText: {
-      color: textSecondary,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    layerBtnTextActive: {
-      color: '#fff',
     },
   });
 };

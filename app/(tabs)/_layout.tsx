@@ -2,28 +2,50 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '../../services/store';
 
+// Colores SIVI (Secure Core Aesthetic)
+const SIVI_THEME = {
+  background: '#0A0A0B',
+  surface: '#121214',
+  primary: '#2E9BFF', 
+  text: '#ffffff',
+  textMuted: '#ffffff', // De plomo a blanco para máxima claridad
+  border: '#ffffff10'
+};
+
 export default function TabsLayout() {
-  const { isDarkMode } = useAppStore();
+  const { userData, impersonatedWorkspace, activeWorkspace } = useAppStore();
+  const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
+  const restrictAccess = isSuperAdmin && !impersonatedWorkspace;
+  const currentWs = impersonatedWorkspace || activeWorkspace;
+  const hideCameras = restrictAccess || (currentWs?.type === 'local' && !isSuperAdmin);
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: isDarkMode ? '#0a0a0a' : '#ffffff',
-          borderTopColor: isDarkMode ? '#1a1a1a' : '#e5e7eb',
+          backgroundColor: '#0E0E0E',
+          borderTopColor: SIVI_THEME.border,
           borderTopWidth: 1,
+          height: 85,
+          paddingBottom: 25,
+          paddingTop: 10,
+          display: restrictAccess ? 'none' : 'flex', // Ocultamos la barra completa si no hay workspace
         },
-        tabBarActiveTintColor: isDarkMode ? '#00ff88' : '#2196f3',
-        tabBarInactiveTintColor: isDarkMode ? '#444' : '#9ca3af',
+        tabBarActiveTintColor: SIVI_THEME.primary,
+        tabBarInactiveTintColor: SIVI_THEME.textMuted,
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600',
+        }
       }}
     >
       <Tabs.Screen
         name="dashboard"
         options={{
           title: 'Dashboard',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid-outline" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "grid" : "grid-outline"} size={22} color={color} />
           ),
         }}
       />
@@ -31,8 +53,9 @@ export default function TabsLayout() {
         name="cameras"
         options={{
           title: 'Cámaras',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="videocam-outline" size={size} color={color} />
+          href: hideCameras ? null : undefined,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "videocam" : "videocam-outline"} size={22} color={color} />
           ),
         }}
       />
@@ -40,22 +63,40 @@ export default function TabsLayout() {
         name="alerts"
         options={{
           title: 'Alertas',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="warning-outline" size={size} color={color} />
+          href: restrictAccess ? null : undefined,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "notifications" : "notifications-outline"} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: 'Eventos',
+          href: restrictAccess ? null : undefined,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "flash" : "flash-outline"} size={22} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
-          title: 'Búsqueda',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search-outline" size={size} color={color} />
+          title: 'Buscar',
+          href: restrictAccess ? null : undefined,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "search" : "search-outline"} size={22} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="faces"
+        name="settings"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="event-config"
         options={{
           href: null,
         }}

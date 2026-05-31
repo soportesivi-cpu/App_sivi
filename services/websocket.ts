@@ -1,62 +1,269 @@
+/**
+ * websocket.ts
+ * Servicio de conectividad en tiempo real para AliceGuardian.
+ * Usa socket.io-client@2.3.0 para compatibilidad con el servidor
+ * SIVI Imperium que corre Engine.IO v3 (EIO=3).
+ *
+ * Protocolo de handshake del servidor SIVI:
+ * 1. Conectar al namespace (ej: /workspace-data)
+ * 2. Autenticarse con el token JWT
+ * 3. Emitir "start_streaming" con el nombre del stream → SIN ESTO, EL SERVIDOR NO ENVÍA NADA
+ *
+ * Namespaces confirmados del HAR de producción:
+ * - /workspace-data   → start_streaming("data")   → alarm_stats, alarm_throughput, face, alert
+ * - /workspace-lpr    → start_streaming("lpr")    → lpr, alert
+ * - /workspace-motion → start_streaming("motion") → event_motion, alert
+ * - /workspace-GUNS   → start_streaming("GUNS")   → detection, alert
+ */
+
+// @ts-ignore — tipos de v2 no están 100% alineados con v4, ignorar advertencias
+import io from 'socket.io-client';
 import { useAppStore } from './store';
+import { PROD_API_DOMAIN } from '../constants/config';
+import { playNotificationSound } from './sound';
 
-export class AlertWebSocket {
-  private ws: WebSocket | null = null;
-  private isIntentionalClose = false;
-  
-  async connect(onAlert: (data: any) => void) {
-    this.isIntentionalClose = false;
-    const { activeDomain: domain, jwtToken: token } = useAppStore.getState();
+// ─── Tipos ──────────────────────────────────────────────────────────────────
 
-    if (!domain || !token) return;
+export type AlertChannel = 'face' | 'lpr' | 'alert' | 'event_motion' | 'statistics'
+  | 'alarm_stats' | 'alarm_throughput' | 'motion' | 'data' | 'detection'
+  | 'new_event' | 'GUNS' | 'new_alert';
 
-    // Emular el transporte websocket nativo de Socket.IO
-    this.ws = new WebSocket(`wss://${domain}/socket.io/?EIO=3&transport=websocket&token=${token}`);
-    
-    this.ws.onmessage = (event) => {
-      try {
-        const text = String(event.data);
-        
-        // Responder al Engine.IO PING ('2') con PONG ('3') para mantener conexión
-        if (text.startsWith('2')) {
-          this.ws?.send('3');
-          return;
-        }
+export type AlertPayload = {
+  channel: AlertChannel;
+  data: any;
+};
 
-        // Manejar mensajes EVENT de Socket.IO ('42')
-        if (text.startsWith('42')) {
-          const payload = JSON.parse(text.substring(2));
-          // payload e.g. ["eventName", { data }]
-          const eventName = payload[0];
-          const eventData = payload[1];
-          
-          if (eventName === 'alert' || eventName === 'statistics' || eventData?.probability) {
-            onAlert(eventData);
-          }
-        } else if (text.startsWith('{')) {
-          // Fallback por si en algún momento mandan JSON puro
-          const data = JSON.parse(text);
-          if (data?.type === 'alert' || data?.probability) {
-             onAlert(data);
-          }
-        }
-      } catch (e) {
-        console.log('Error parseando WS:', event.data, e);
-      }
-    };
+export type AlertCallback = (payload: AlertPayload) => void;
 
-    this.ws.onclose = () => {
-      if (!this.isIntentionalClose) {
-        setTimeout(() => this.connect(onAlert), 3000);
-      }
+// ─── Configuración de namespaces según HAR de producción ────────────────────
+
+type NamespaceConfig = {
+  path: string;
+  streamName: string;
+  channels: string[];
+};
+
+const SIVI_NAMESPACES: NamespaceConfig[] = [
+  {
+    path: '/workspace-data',
+    streamName: 'data',
+    channels: ['face', 'alert', 'statistics', 'alarm_stats', 'alarm_throughput', 'new_alert', 'detection', 'new_event', 'data']
+  },
+  {
+    path: '/workspace-lpr',
+    streamName: 'lpr',
+    channels: ['lpr', 'alert', 'new_alert', 'detection', 'new_event']
+  },
+  {
+    path: '/workspace-motion',
+    streamName: 'motion',
+    channels: ['event_motion', 'motion', 'alert', 'new_alert', 'detection', 'new_event']
+  },
+  {
+    path: '/workspace-GUNS',
+    streamName: 'GUNS',
+    channels: ['alert', 'detection', 'new_alert', 'new_event', 'GUNS']
+  }
+];
+
+// Canales que activan sonido de notificación
+const SOUND_CHANNELS = new Set(['alert', 'face', 'lpr', 'event_motion', 'motion', 'new_alert', 'detection', 'GUNS']);
+
+// Canales de telemetría/métricas continuas de alta frecuencia que silenciaremos en consola
+const SILENT_CHANNELS = new Set(['alarm_stats', 'alarm_throughput', 'statistics', 'data', 'states_workspace', 'states_camera', 'heartbeat', 'ping', 'pong', 'status']);
+
+// ─── Clase principal ─────────────────────────────────────────────────────────
+
+export class AlertSocketService {
+  private sockets: any[] = [];
+  private listeners: AlertCallback[] = [];
+
+  // ── Registro de listeners ────────────────────────────────────────────────
+
+  subscribe(cb: AlertCallback): () => void {
+    this.listeners.push(cb);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== cb);
     };
   }
 
+  private emitToListeners(payload: AlertPayload) {
+    this.listeners.forEach(cb => {
+      try { cb(payload); } catch (e) {}
+    });
+  }
+
+  private triggerSound(channel: string) {
+    if (SOUND_CHANNELS.has(channel)) {
+      const { soundEnabled } = useAppStore.getState();
+      if (soundEnabled) {
+        playNotificationSound().catch(() => {});
+      }
+    }
+  }
+
+  // ── Conexión ─────────────────────────────────────────────────────────────
+
+  connect() {
+    if (this.sockets.length > 0) return;
+
+    const { jwtToken: token, activeDomain } = useAppStore.getState();
+    if (!token) {
+      console.warn('[WS] Sin token — abortando conexión');
+      return;
+    }
+
+    if (!activeDomain) {
+      console.warn('[WS] Sin dominio activo configurado');
+      return;
+    }
+
+    // ── Resolución de URL del servidor de Socket.IO ──
+    let serverUrl = '';
+    const isLocal = /^\d+\.\d+\.\d+\.\d+/.test(activeDomain || '') || activeDomain?.includes('localhost') || activeDomain?.includes(':') || activeDomain?.includes('.local');
+    if (isLocal) {
+      const parts = activeDomain.split(':');
+      const host = parts[0];
+      const apiPort = parts[1];
+
+      // FRP: Nginx unificado proxea /socket.io/ al puerto 4550 local
+      // VPN: Conectamos directo al puerto 4550
+      let wsPort = '4550';
+      if (apiPort === '19090') wsPort = '19090'; // Nginx unificado en FRP
+      else if (apiPort === '29090') wsPort = '29090';
+      else if (apiPort === '39090') wsPort = '39090';
+      else if (apiPort === '9090') wsPort = '4550'; // VPN directo
+      else if (apiPort) wsPort = apiPort;
+
+      serverUrl = `http://${host}:${wsPort}`;
+    } else {
+      serverUrl = `https://${activeDomain || PROD_API_DOMAIN}`;
+    }
+
+    console.log(`[WS] 🔄 Iniciando conexiones multiplexadas a ${serverUrl} (${SIVI_NAMESPACES.length} namespaces)...`);
+
+    const socketOptions = {
+      transports: ['websocket', 'polling'],
+      path: '/socket.io',
+      query: { token },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 5000,
+      randomizationFactor: 0.5,
+      forceNew: true,
+    };
+
+    // Capturamos referencia a 'this' para usar dentro de callbacks function()
+    const self = this;
+
+    SIVI_NAMESPACES.forEach(({ path, streamName, channels }) => {
+      const nsUrl = `${serverUrl}${path}`;
+      console.log(`[WS] 📡 Conectando a namespace: ${nsUrl}`);
+      const socket = io(nsUrl, socketOptions);
+      this.sockets.push(socket);
+
+      // ── Eventos de ciclo de vida ──
+
+      socket.on('connect', () => {
+        console.log(`[WS] ✅ Conectado a ${path}. SID: ${socket.id}`);
+
+        // Paso 1: Autenticación con JWT
+        socket.emit('authenticate', { token });
+
+        // ╔══════════════════════════════════════════════════════════════════╗
+        // ║  PASO CRÍTICO: start_streaming handshake                       ║
+        // ║  Sin este emit, el servidor SIVI NO envía NINGÚN evento.       ║
+        // ║  Confirmado por HAR de producción:                             ║
+        // ║  42/workspace-data,["start_streaming","data"]                  ║
+        // ╚══════════════════════════════════════════════════════════════════╝
+        socket.emit('start_streaming', streamName);
+        console.log(`[WS] 🚀 Emitido start_streaming("${streamName}") en ${path}`);
+      });
+
+      socket.on('reconnect', () => {
+        console.log(`[WS] 🔁 Reconectado a ${path}. Re-emitiendo start_streaming...`);
+        socket.emit('authenticate', { token });
+        socket.emit('start_streaming', streamName);
+      });
+
+      socket.on('disconnect', (reason: string) => {
+        console.warn(`[WS] ❌ Desconectado de ${path}: ${reason}`);
+      });
+
+      socket.on('connect_error', (err: Error) => {
+        console.error(`[WS] ⚠️ Error de conexión en ${path}: ${err.message}`);
+      });
+
+      // ── Escuchar canales explícitos definidos por el namespace ──
+      channels.forEach(channel => {
+        socket.on(channel, (data: any) => {
+          if (!SILENT_CHANNELS.has(channel)) {
+            console.log(`[WS] 📨 Evento "${channel}" en ${path}:`,
+              typeof data === 'object' ? JSON.stringify(data).substring(0, 200) : data
+            );
+          }
+          self.emitToListeners({ channel: channel as AlertChannel, data });
+          self.triggerSound(channel);
+        });
+      });
+
+      // ── Interceptor catch-all: captura CUALQUIER evento del servidor ──
+      // Socket.IO v2 no tiene onAny(), pero podemos interceptar el dispatcher interno
+      const originalOnevent = socket.onevent;
+      socket.onevent = function(packet: any) {
+        const args = packet.data || [];
+        const eventName = args[0];
+        const eventData = args.length > 1 ? args[1] : undefined;
+
+        // Log ALL raw events for debugging (suppressing high-frequency telemetry)
+        if (eventName && !SILENT_CHANNELS.has(eventName)) {
+          console.log(`[WS] 🔍 RAW en ${path}: "${eventName}"`,
+            typeof eventData === 'object' ? JSON.stringify(eventData).substring(0, 150) : (eventData ?? '')
+          );
+        }
+
+        // Si el evento no está registrado explícitamente, lo reenviamos de todas formas
+        if (eventName && !channels.includes(eventName) && eventName !== 'message') {
+          self.emitToListeners({ channel: eventName as AlertChannel, data: eventData });
+          self.triggerSound(eventName);
+        }
+
+        // Llamar al handler original para que los listeners .on() funcionen
+        if (originalOnevent) {
+          originalOnevent.call(this, packet);
+        }
+      };
+
+      // ── Escuchar canal genérico 'message' ──
+      socket.on('message', (data: any) => {
+        console.log(`[WS] 📩 message en ${path}:`,
+          typeof data === 'object' ? JSON.stringify(data).substring(0, 200) : data
+        );
+        const channel = (data?.type || data?.channel || 'alert') as AlertChannel;
+        self.emitToListeners({ channel, data });
+        self.triggerSound(channel);
+      });
+    });
+  }
+
+  // ── Desconexión ──────────────────────────────────────────────────────────
+
   disconnect() {
-    this.isIntentionalClose = true;
-    this.ws?.close();
-    this.ws = null;
+    this.sockets.forEach(socket => {
+      try {
+        socket.removeAllListeners();
+        socket.disconnect();
+      } catch (e) {}
+    });
+    this.sockets = [];
+    console.log('[WS] ⛔ Todos los sockets desconectados intencionalmente');
+  }
+
+  isConnected(): boolean {
+    return this.sockets.some(socket => socket.connected);
   }
 }
 
-export const wsService = new AlertWebSocket();
+// Instancia singleton para toda la app
+export const wsService = new AlertSocketService();
