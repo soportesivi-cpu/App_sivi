@@ -286,20 +286,6 @@ export default function SuperAdminDashboard() {
 
                   {/* Lado derecho: Estado + Chevron */}
                   <View style={styles.cardRight}>
-                    {/* Badge de Anomalías (si existen reportes en la cola o RTSP) */}
-                    {instance.anomalies && instance.anomalies.length > 0 && (
-                      <View style={[
-                        styles.typeBadge,
-                        {
-                          backgroundColor: '#FF980015',
-                          borderColor: '#FF980040',
-                        }
-                      ]}>
-                        <Text style={[styles.typeText, { color: '#FF9800', fontWeight: 'bold' }]}>
-                          ⚠️ ANOMALÍA
-                        </Text>
-                      </View>
-                    )}
 
                     {/* Tipo de Workspace: LOCAL o NUBE */}
                     {type && (

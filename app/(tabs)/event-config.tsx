@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,23 +10,28 @@ import {
   TextInput,
   ActivityIndicator,
   Platform,
-  StatusBar
+  StatusBar,
+  PanResponder
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { WebView } from 'react-native-webview';
+import Svg, { Polygon, Circle } from 'react-native-svg';
 import { useAppStore } from '../../services/store';
+import { WORKSPACES, PROD_MEDIA_DOMAIN } from '../../constants/config';
 import { 
   getWorkspaceAlarmConfigurationDetail, 
   updateWorkspaceAlarmConfiguration, 
-  updateWorkspaceAlarmPolygons
+  updateWorkspaceAlarmPolygons,
+  getDevices
 } from '../../services/api';
 
 export default function EventConfigScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const queryClient = useQueryClient();
-  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions } = useAppStore();
+  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions, jwtToken: token } = useAppStore();
   const currentWs = impersonatedWorkspace || activeWorkspace;
 
   // Estados Accordion
@@ -56,6 +61,80 @@ export default function EventConfigScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
 
+  // WebRTC Live Player & ROI interactive state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const activePointIndex = useRef<number | null>(null);
+
+  const handleLayout = (event: any) => {
+    const { width, height } = event.nativeEvent.layout;
+    setDimensions({ width, height });
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        if (!dimensions.width || !dimensions.height) return;
+
+        let parsedPoints: any[] = [];
+        try {
+          parsedPoints = typeof roiPoints === 'string' ? JSON.parse(roiPoints) : roiPoints;
+        } catch (e) {}
+
+        if (!Array.isArray(parsedPoints) || parsedPoints.length === 0) {
+          parsedPoints = [[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]];
+        }
+
+        let closestIndex = 0;
+        let minDistance = Infinity;
+
+        parsedPoints.forEach((pt: any, idx: number) => {
+          if (!Array.isArray(pt) || pt.length < 2) return;
+          const px = pt[0] * dimensions.width;
+          const py = pt[1] * dimensions.height;
+          const dx = px - locationX;
+          const dy = py - locationY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestIndex = idx;
+          }
+        });
+
+        if (minDistance < 40) {
+          activePointIndex.current = closestIndex;
+        } else {
+          activePointIndex.current = null;
+        }
+      },
+      onPanResponderMove: (evt) => {
+        if (activePointIndex.current === null || !dimensions.width || !dimensions.height) return;
+        const { locationX, locationY } = evt.nativeEvent;
+
+        let parsedPoints: any[] = [];
+        try {
+          parsedPoints = typeof roiPoints === 'string' ? JSON.parse(roiPoints) : roiPoints;
+        } catch (e) {}
+
+        if (!Array.isArray(parsedPoints) || parsedPoints.length === 0) return;
+
+        const nx = Math.max(0, Math.min(1, locationX / dimensions.width));
+        const ny = Math.max(0, Math.min(1, locationY / dimensions.height));
+
+        const updatedPoints = [...parsedPoints];
+        updatedPoints[activePointIndex.current] = [nx, ny];
+        
+        setRoiPoints(JSON.stringify(updatedPoints));
+      },
+      onPanResponderRelease: () => {
+        activePointIndex.current = null;
+      }
+    })
+  ).current;
+
 
   // 1. Obtener el detalle completo de la regla
   const { data: alarm, isLoading: loadingAlarm, error } = useQuery({
@@ -64,11 +143,102 @@ export default function EventConfigScreen() {
     enabled: !!(workspaceSessions && workspaceSessions.length > 0 && id),
   });
 
+  // Obtener todos los dispositivos del workspace para resolver discrepancias de IDs
+  const { data: devicesData } = useQuery({
+    queryKey: ['workspace-devices', domain, currentWs?.id],
+    queryFn: () => getDevices(),
+    enabled: !!(workspaceSessions && workspaceSessions.length > 0),
+  });
 
+  const activeSession = useMemo(() => {
+    const wsId = currentWs?.id || currentWs?.workspace || '';
+    const match = workspaceSessions?.find((s: any) => s.workspace?.toLowerCase() === wsId.toLowerCase());
+    return match ? [match] : [];
+  }, [workspaceSessions, currentWs]);
+
+  const workspaceTokenForStream = useMemo(() => {
+    return activeSession[0]?.token || token || '';
+  }, [activeSession, token]);
+
+  const cameraDevice = useMemo(() => {
+    if (!alarm) return null;
+    if (alarm.device) return alarm.device;
+    const detailDev = alarm.Detail_device_alarm?.[0];
+    if (detailDev) {
+      return detailDev.device || detailDev.Device || detailDev;
+    }
+    return null;
+  }, [alarm]);
+
+  const resolvedCamera = useMemo(() => {
+    if (!cameraDevice || !devicesData?.rows) return cameraDevice;
+    const targetUuid = cameraDevice.deviceId || cameraDevice.device_id || cameraDevice.uuid;
+    if (!targetUuid) return cameraDevice;
+    
+    // Buscar la cámara en la lista completa por su UUID para obtener el ID de base de datos correcto (e.g. 27)
+    const match = devicesData.rows.find((d: any) => 
+      (d.deviceId || d.device_id || d.uuid || '').toLowerCase() === targetUuid.toLowerCase()
+    );
+    
+    if (match) {
+      console.log('[STREAM ROI] Cámara vinculada encontrada en dispositivos:', match);
+      return match;
+    }
+    return cameraDevice;
+  }, [cameraDevice, devicesData]);
+
+  function getStreamName(camera: any): string {
+    const camId = camera?.id;
+    const camDevId = camera?.deviceId || camera?.device_id || camera?.uuid;
+    
+    console.log('[STREAM ROI] getStreamName input:', camera);
+    if (camId && camDevId) {
+      const result = `${camId}-${camDevId}/1`;
+      console.log(`[STREAM ROI] getStreamName output (FORZADO): "${result}"`);
+      return result;
+    }
+    const fallback = camDevId || `camara${camId || ''}`;
+    console.log(`[STREAM ROI] getStreamName output (FALLBACK): "${fallback}"`);
+    return fallback;
+  }
+
+  function getWebRtcUrl(camera: any): string {
+    const streamName = getStreamName(camera);
+    let effectiveDomain = domain;
+    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
+      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
+      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    }
+
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
+    if (isIpOrLocal && effectiveDomain) {
+      const parts = effectiveDomain.split(':');
+      const host = parts[0];
+      const apiPort = parts[1];
+
+      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
+        let whepHtpsPort = '18890';
+        if (apiPort === '29090') whepHtpsPort = '28890';
+        else if (apiPort === '39090') whepHtpsPort = '38890';
+        return `https://local.imperium.pe:${whepHtpsPort}/${streamName}/`;
+      }
+      return `http://${host}:8889/${streamName}/`;
+    }
+
+    return `https://${PROD_MEDIA_DOMAIN}:8889/${streamName}/`;
+  }
+
+
+
+  // Resetear el estado de reproducción al cambiar de alarma (evita que se quede reproduciendo en caché de navegación)
+  useEffect(() => {
+    setIsPlaying(false);
+  }, [id]);
 
   // 4. Inicializar controles al cargar datos reales
   useEffect(() => {
     if (alarm) {
+      console.log('[DEBUG ALARM DETAIL]:', JSON.stringify(alarm, null, 2));
       setEventActive(alarm.state ?? true);
       setSelectedSoundId(alarm.sound ?? null);
       setFrequencyVal(String(alarm.frequency ?? "3"));
@@ -94,7 +264,11 @@ export default function EventConfigScreen() {
       if (roiObj) {
         setRoiActive(roiObj.state ?? true);
         setRoiId(roiObj.id ?? null);
-        setRoiPoints(roiObj.points ?? "[]");
+        let pts = roiObj.points ?? "[]";
+        if (pts === "[]" || !pts) {
+          pts = "[[0.25,0.25],[0.75,0.25],[0.75,0.75],[0.25,0.75]]";
+        }
+        setRoiPoints(pts);
       } else {
         setRoiId(null);
       }
@@ -292,8 +466,8 @@ export default function EventConfigScreen() {
         {/* 1. SECCIÓN: DATOS GENERALES (IMAGEN 1 SUPERIOR) */}
         <View style={styles.bentoBlock}>
           <View style={styles.blockHeader}>
-            <Ionicons name="create-outline" size={16} color="#2E9BFF" />
-            <Text style={[styles.blockTitle, { color: '#2E9BFF' }]}>DATOS GENERALES</Text>
+            <Ionicons name="create-outline" size={20} color="#2E9BFF" />
+            <Text style={styles.blockTitle}>DATOS GENERALES</Text>
           </View>
           
           <View style={styles.inputGroup}>
@@ -353,50 +527,58 @@ export default function EventConfigScreen() {
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Ionicons name="list-outline" size={16} color="#FF9800" />
-              <Text style={[styles.blockTitle, { color: '#FF9800' }]}>REGLAS REGISTRADAS</Text>
+              <Ionicons name="list-outline" size={20} color="#2E9BFF" />
+              <Text style={styles.blockTitle}>REGLAS REGISTRADAS</Text>
             </View>
             <Ionicons name={rulesExpanded ? "chevron-up" : "chevron-down"} size={16} color="#fff" />
           </TouchableOpacity>
 
           {rulesExpanded && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={true} style={{ marginTop: 12 }}>
-              <View style={styles.table}>
-                {/* Cabecera de Tabla */}
-                <View style={styles.tableHeader}>
-                  <View style={[styles.tableCell, { width: 90 }]}><Text style={styles.tableHeaderText}>Analítica</Text></View>
-                  <View style={[styles.tableCell, { width: 80 }]}><Text style={styles.tableHeaderText}>Estado</Text></View>
-                  <View style={[styles.tableCell, { width: 100 }]}><Text style={styles.tableHeaderText}>Etiqueta</Text></View>
-                  <View style={[styles.tableCell, { width: 90 }]}><Text style={styles.tableHeaderText}>Probabilidad</Text></View>
-                  <View style={[styles.tableCell, { width: 100 }]}><Text style={styles.tableHeaderText}>Tag Counter</Text></View>
-                </View>
-
-                {/* Filas de Reglas */}
-                {parsedRules.length === 0 ? (
-                  <View style={{ padding: 16, alignItems: 'center' }}>
-                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>No hay analíticas asociadas</Text>
-                  </View>
-                ) : (
-                  parsedRules.map((rule: any, idx: number) => (
-                    <View key={idx} style={styles.tableRow}>
-                      <View style={[styles.tableCell, { width: 90 }]}><Text style={[styles.tableCellText, { fontWeight: 'bold' }]}>{rule.analytic}</Text></View>
-                      <View style={[styles.tableCell, { width: 80 }]}>
-                        <Text style={[styles.tableCellText, { color: rule.state === 'true' ? '#00C853' : '#f44336' }]}>
+            parsedRules.length === 0 ? (
+              <View style={{ padding: 16, alignItems: 'center' }}>
+                <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>No hay analíticas asociadas</Text>
+              </View>
+            ) : (
+              <View style={{ marginTop: 12, gap: 10 }}>
+                {parsedRules.map((rule: any, idx: number) => (
+                  <View key={idx} style={styles.reportCard}>
+                    {/* Fila superior: Analítica y Estado */}
+                    <View style={styles.reportCardHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="analytics-outline" size={14} color="#2E9BFF" />
+                        <Text style={styles.reportAnalyticText}>{rule.analytic.toUpperCase()}</Text>
+                      </View>
+                      <View style={[styles.reportStatusBadge, { backgroundColor: rule.state === 'true' ? '#00C85315' : '#f4433615' }]}>
+                        <View style={[styles.reportStatusDot, { backgroundColor: rule.state === 'true' ? '#00C853' : '#f44336' }]} />
+                        <Text style={[styles.reportStatusText, { color: rule.state === 'true' ? '#00C853' : '#f44336' }]}>
                           {rule.state === 'true' ? 'Activo' : 'Inactivo'}
                         </Text>
                       </View>
-                      <View style={[styles.tableCell, { width: 100 }]}><Text style={styles.tableCellText}>{rule.tag}</Text></View>
-                      <View style={[styles.tableCell, { width: 90 }]}><Text style={styles.tableCellText}>{rule.prob}</Text></View>
-                      <View style={[styles.tableCell, { width: 100 }]}><Text style={styles.tableCellText}>{rule.tag_count}</Text></View>
                     </View>
-                  ))
-                )}
+
+                    {/* Detalles */}
+                    <View style={styles.reportDetailsRow}>
+                      <View style={styles.reportDetailItem}>
+                        <Text style={styles.reportDetailLabel}>ETIQUETA</Text>
+                        <Text style={styles.reportDetailValue}>{rule.tag}</Text>
+                      </View>
+                      <View style={styles.reportDetailItem}>
+                        <Text style={styles.reportDetailLabel}>PROBABILIDAD</Text>
+                        <Text style={styles.reportDetailValue}>{rule.prob}</Text>
+                      </View>
+                      <View style={styles.reportDetailItem}>
+                        <Text style={styles.reportDetailLabel}>TAG COUNTER</Text>
+                        <Text style={styles.reportDetailValue}>{rule.tag_count}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
               </View>
-            </ScrollView>
+            )
           )}
         </View>
 
-        {/* 4. SECCIÓN: ACCIONES - ACTIONS REGISTERED (IMAGEN 1 INFERIOR) */}
+        {/* 4. SECCIÓN: ACCIONES REGISTRADAS */}
         <View style={styles.bentoBlock}>
           <TouchableOpacity 
             style={styles.accordionHeader} 
@@ -404,14 +586,14 @@ export default function EventConfigScreen() {
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Ionicons name="notifications-outline" size={16} color="#d71a18" />
-              <Text style={[styles.blockTitle, { color: '#d71a18' }]}>ACCIONES - ACTIONS REGISTERED</Text>
+              <Ionicons name="notifications-outline" size={20} color="#2E9BFF" />
+              <Text style={styles.blockTitle}>ACCIONES REGISTRADAS</Text>
             </View>
             <Ionicons name={actionsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#fff" />
           </TouchableOpacity>
 
           {actionsExpanded && (
-            <View style={{ marginTop: 12, gap: 12 }}>
+            <View style={{ marginTop: 12, gap: 8 }}>
               {/* Pop up y Notifiable */}
               <View style={styles.switchRow}>
                 <View style={styles.switchCol}>
@@ -491,8 +673,6 @@ export default function EventConfigScreen() {
                 </View>
               </View>
 
-              <View style={styles.divider} />
-
               {/* Cooldown / Tiempo de alerta */}
               <View style={styles.inputGroup}>
                 <Text style={styles.selectorLabel}>TIEMPO DE ALERTA (SEGUNDOS)</Text>
@@ -511,7 +691,7 @@ export default function EventConfigScreen() {
         {/* 6. SECCIÓN: REGIÓN DE INTERÉS (ROI) */}
         <View style={styles.bentoBlock}>
           <View style={styles.blockHeader}>
-            <Ionicons name="scan-outline" size={16} color="#ffffff60" />
+            <Ionicons name="scan-outline" size={20} color="#2E9BFF" />
             <Text style={styles.blockTitle}>REGIÓN DE INTERÉS (ROI)</Text>
           </View>
 
@@ -550,16 +730,85 @@ export default function EventConfigScreen() {
             <Text style={styles.settingDesc}>No se detectaron polígonos asociados a esta regla.</Text>
           )}
           
-          <View style={[styles.roiContainer, (!roiActive || roiId === null) && { opacity: 0.3 }]}>
-             <Image 
-                source={{ uri: 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }} 
-                style={styles.roiImage} 
-             />
-             <View style={styles.roiOverlay}>
+          <View 
+            style={[styles.roiContainer, (!roiActive || roiId === null) && { opacity: 0.3 }]}
+            onLayout={handleLayout}
+          >
+             {/* 1. Fondo (Video o Imagen Estática) */}
+             {isPlaying && resolvedCamera ? (
+               <WebView
+                 source={{ uri: `${getWebRtcUrl(resolvedCamera)}?token=${workspaceTokenForStream}` }}
+                 allowsInlineMediaPlayback={true}
+                 mediaPlaybackRequiresUserAction={false}
+                 domStorageEnabled={true}
+                 javaScriptEnabled={true}
+                 mixedContentMode="always"
+                 originWhitelist={['*']}
+                 style={styles.roiVideo}
+               />
+             ) : (
+               <TouchableOpacity 
+                 style={StyleSheet.absoluteFillObject} 
+                 onPress={() => setIsPlaying(true)}
+                 activeOpacity={0.9}
+               >
+                 <Image 
+                    source={{ uri: 'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=600&q=80' }} 
+                    style={styles.roiImage} 
+                 />
+                 <View style={styles.playOverlayBtn}>
+                   <Ionicons name="play-circle" size={48} color="#2E9BFF" />
+                   <Text style={styles.playBtnText}>INICIAR VIDEO EN VIVO</Text>
+                 </View>
+               </TouchableOpacity>
+             )}
+
+             {/* 2. Capa de Gestos SVG para Manipular Polígonos (Siempre visible si el ROI está activo) */}
+             {roiActive && roiId !== null && pointsList.length > 0 && dimensions.width > 0 && (
+               <View style={StyleSheet.absoluteFillObject} {...panResponder.panHandlers}>
+                 <Svg width="100%" height="100%" style={StyleSheet.absoluteFillObject}>
+                   <Polygon
+                     points={pointsList.map((pt: any) => `${pt[0] * dimensions.width},${pt[1] * dimensions.height}`).join(' ')}
+                     fill="rgba(46, 155, 255, 0.25)"
+                     stroke="#2E9BFF"
+                     strokeWidth="3"
+                   />
+                   {pointsList.map((pt: any, index: number) => (
+                     <Circle
+                       key={index}
+                       cx={pt[0] * dimensions.width}
+                       cy={pt[1] * dimensions.height}
+                       r="12"
+                       fill="#2E9BFF"
+                       stroke="#ffffff"
+                       strokeWidth="2.5"
+                     />
+                   ))}
+                 </Svg>
+               </View>
+             )}
+
+             {/* 3. Superposición de Control (Tag de cámara e ícono Play/Pause) */}
+             <View style={styles.roiOverlay} pointerEvents="box-none">
                 <View style={styles.roiTag}>
-                   <View style={styles.liveDot} />
-                   <Text style={styles.roiTagText}>{alarm?.device?.name || 'Cámara Vinculada'}</Text>
+                   <View style={[styles.liveDot, isPlaying && { backgroundColor: '#00C853' }]} />
+                   <Text style={styles.roiTagText}>{resolvedCamera?.name || 'Cámara Vinculada'}</Text>
                 </View>
+                
+                {/* Botón flotante para iniciar/detener streaming */}
+                {resolvedCamera && (
+                  <TouchableOpacity 
+                    style={styles.pauseBtn}
+                    onPress={() => setIsPlaying(!isPlaying)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons 
+                      name={isPlaying ? "pause-circle" : "play-circle"} 
+                      size={24} 
+                      color={isPlaying ? "#ffffffaa" : "#2E9BFF"} 
+                    />
+                  </TouchableOpacity>
+                )}
              </View>
           </View>
         </View>
@@ -604,15 +853,75 @@ const styles = StyleSheet.create({
   mainTitle: { color: '#ffffff', fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
   subTitle: { color: 'rgba(255,255,255,0.45)', fontSize: 13, marginTop: 4, fontWeight: '500' },
 
-  bentoBlock: { backgroundColor: '#101424', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#ffffff08' },
+  bentoBlock: { backgroundColor: '#1A1C2C', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#ffffff08' },
   blockHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
-  blockTitle: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  blockTitle: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: '#ffffff' },
 
   accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
 
+  // Estilos de Reporte de Reglas
+  reportCard: {
+    backgroundColor: '#090B14',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ffffff08',
+  },
+  reportCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  reportAnalyticText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  reportStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    gap: 4,
+  },
+  reportStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  reportStatusText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  reportDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  reportDetailItem: {
+    flex: 1,
+  },
+  reportDetailLabel: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  reportDetailValue: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
   // Estilos de Tablas
   table: { borderWidth: 1, borderColor: '#ffffff10', borderRadius: 8, overflow: 'hidden' },
-  tableHeader: { flexDirection: 'row', backgroundColor: '#1A1C2C', borderBottomWidth: 1, borderBottomColor: '#ffffff10' },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#11131e', borderBottomWidth: 1, borderBottomColor: '#ffffff10' },
   tableHeaderText: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '800' },
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#ffffff08', backgroundColor: '#090B14' },
   tableCell: { paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center' },
@@ -620,8 +929,8 @@ const styles = StyleSheet.create({
   statusBadgeCell: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 
   // Estilos de los switches estilo Web
-  switchRow: { flexDirection: 'row', gap: 12 },
-  switchCol: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1A1C2C', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ffffff08' },
+  switchRow: { flexDirection: 'row', gap: 8 },
+  switchCol: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#090B14', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ffffff08' },
   switchLabel: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 15 },
@@ -633,7 +942,7 @@ const styles = StyleSheet.create({
   soundScroll: { marginTop: 10 },
   soundPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
   soundPillActive: { backgroundColor: '#2E9BFF18', borderColor: '#2E9BFF40' },
-  soundPillInactive: { backgroundColor: '#1A1C2C', borderColor: 'rgba(255,255,255,0.06)' },
+  soundPillInactive: { backgroundColor: '#090B14', borderColor: 'rgba(255,255,255,0.06)' },
   soundText: { fontSize: 11, fontWeight: '700' },
   soundTextActive: { color: '#2E9BFF' },
   soundTextInactive: { color: 'rgba(255,255,255,0.4)' },
@@ -643,20 +952,25 @@ const styles = StyleSheet.create({
   pointTagText: { color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '700' },
 
   roiContainer: { width: '100%', aspectRatio: 16/9, borderRadius: 12, overflow: 'hidden', backgroundColor: '#000', marginTop: 16, borderWidth: 1, borderColor: '#ffffff10' },
-  roiImage: { width: '100%', height: '100%', opacity: 0.5 },
+  roiImage: { width: '100%', height: '100%', opacity: 0.25 },
   roiOverlay: { ...StyleSheet.absoluteFillObject, padding: 12 },
   roiTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#000000cc', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start', gap: 6, borderWidth: 1, borderColor: '#ffffff10' },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F44336' },
   roiTagText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  roiVideo: { width: '100%', height: '100%', backgroundColor: '#000' },
+  playOverlayBtn: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', gap: 8 },
+  playBtnText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  pauseBtn: { position: 'absolute', top: 12, right: 12, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
 
   alarmBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.03)' },
   alarmBoxActive: { backgroundColor: 'rgba(244, 67, 54, 0.04)', borderWidth: 1, borderColor: 'rgba(244, 67, 54, 0.15)' },
   alarmParams: { marginTop: 14 },
   inputGroup: { gap: 6 },
-  darkInput: { backgroundColor: '#1A1C2C', height: 46, borderRadius: 10, paddingHorizontal: 14, color: '#fff', fontSize: 13, fontWeight: '700', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  darkInput: { backgroundColor: '#090B14', height: 46, borderRadius: 10, paddingHorizontal: 14, color: '#fff', fontSize: 13, fontWeight: '700', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  timeRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  timeInputBox: { flex: 1, gap: 6 },
 
-
-  saveBtn: { backgroundColor: '#2E9BFF', height: 50, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 },
+  saveBtn: { backgroundColor: '#2E9BFF', height: 50, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8, alignSelf: 'center', paddingHorizontal: 24 },
   saveBtnText: { color: '#fff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
 
 });
