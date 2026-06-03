@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import { useIsFocused } from '@react-navigation/native';
 import { getAlarms } from '../../services/api';
 import { useAppStore } from '../../services/store';
+import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
 
 interface EventItem {
@@ -30,39 +32,91 @@ interface EventItem {
   };
 }
 
-// ⚠️ MOCK_EVENTS has been updated to match the exact names, counts, and probabilities from the user's screenshot
+// ⚠️ MOCK_EVENTS has been updated to match the exact names, counts, and properties from the user's screenshot
 const MOCK_EVENTS: EventItem[] = [
-  { id: 1, name: 'INGRESO_CASETA', type: 'OBJECT', devices: 1, active: true, params: { object: 'Objeto', minTime: '0.5s', prob: '75%' } },
-  { id: 2, name: 'SALIDA_CASETA', type: 'OBJECT', devices: 2, active: true, params: { object: 'Objeto', minTime: '0.5s', prob: '75%' } },
-  { id: 3, name: 'SEGURIDAD_JARDIN', type: 'OBJECT', devices: 1, active: true, params: { object: 'Objeto', minTime: '0.5s', prob: '75%' } },
-  { id: 4, name: 'SALA_MULTIUSOS', type: 'OBJECT', devices: 1, active: true, params: { object: 'Objeto', minTime: '0.5s', prob: '70%' } },
-  { id: 5, name: 'SALA_MUSICA', type: 'OBJECT', devices: 1, active: true, params: { object: 'Objeto', minTime: '0.5s', prob: '70%' } },
-  { id: 6, name: 'COWORKING_ESPACIO', type: 'OBJECT', devices: 1, active: true, params: { object: 'Objeto', minTime: '0.5s', prob: '70%' } },
+  { id: 1, name: 'INGRESO_CASTAÑOS_Aforo', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '2.0s', prob: '75%' } },
+  { id: 2, name: 'SALIDA_CASTAÑOS_AFORO', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '75%' } },
+  { id: 3, name: 'SEGURIDAD_JGRANDA_Aforo', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '75%' } },
+  { id: 4, name: 'SALA_MULTIUSO_SOTANO_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 5, name: 'SALA_MUSICA_SOTANO_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 6, name: 'COWORKING_2_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 7, name: 'DETECCION_MANOS_ARRIBA', type: 'ACTION', devices: 4, active: true, params: { object: 'actions', minTime: '0.2s', prob: '85%' } },
+  { id: 8, name: 'CANCHA_3_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 9, name: 'LOCKER_CAMERINO_DAMAS_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 10, name: 'CAMARA_GERENCIA_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 11, name: 'LOCKER_CAMERINO_VARONES_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 12, name: 'CAJA_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 13, name: 'CUARTO_MAQUINAS_EDIFICIO_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 14, name: 'ASOCIADOS_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
+  { id: 15, name: 'PASILLO_ASOCIADOS_Zona_Segura', type: 'OBJECT', devices: 1, active: true, params: { object: 'person', minTime: '0.2s', prob: '70%' } },
 ];
 
 export default function EventsScreen() {
   const router = useRouter();
-  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace } = useAppStore();
+  const isFocused = useIsFocused();
+  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
 
   // Dynamic Workspace Name Resolution
   const currentWs = impersonatedWorkspace || activeWorkspace;
   const workspaceName = (currentWs?.name || 'REALCLUB').toUpperCase();
 
+  const queryEnabled = !!(workspaceSessions && workspaceSessions.length > 0);
+  console.log(`[EventsScreen] 🔐 workspaceSessions=${workspaceSessions?.length ?? 0} | queryEnabled=${queryEnabled} | wsId="${currentWs?.id}"`);
+
   const { data: qData, isLoading: loading, refetch, isFetching } = useQuery({
-    queryKey: ['alarms', domain],
+    queryKey: ['alarms', domain, currentWs?.id],
     queryFn: () => getAlarms(1),
-    enabled: !!domain,
+    enabled: queryEnabled,
   });
+
+  // 1. Sincronización automática al enfocar la pestaña
+  useEffect(() => {
+    if (isFocused) {
+      console.log('[EventsScreen] 🔄 Pestaña enfocada. Sincronizando alarmas...');
+      refetch();
+    }
+  }, [isFocused, refetch]);
+
+  // 2. Sincronización reactiva en tiempo real vía WebSockets
+  useEffect(() => {
+    console.log('[EventsScreen] 📡 Suscribiendo listener de WebSockets para Smart Events...');
+    const unsubscribe = wsService.subscribe((payload) => {
+      // Reaccionamos a eventos de cambio en alarmas o estadísticas de aforo
+      if (
+        payload.channel === 'new_event' || 
+        payload.channel === 'alarm_stats' || 
+        payload.channel === 'new_alert' ||
+        payload.channel === 'data'
+      ) {
+        console.log(`[EventsScreen] ⚡ Evento "${payload.channel}" recibido vía WS. Sincronizando alarmas en tiempo real...`);
+        refetch();
+      }
+    });
+
+    return () => {
+      console.log('[EventsScreen] 🔌 Desuscribiendo listener de WebSockets...');
+      unsubscribe();
+    };
+  }, [refetch]);
 
   if (loading) {
     return <Loading />;
   }
 
-  const alarmRows = qData?.rows || [];
+  // 1. Resolver la lista de alarmas de forma defensiva e insensible a la estructura
+  const rawRows = (qData as any)?.rows;
+  const alarmRows = Array.isArray(rawRows) ? rawRows : (Array.isArray(qData) ? qData : []);
+
+  // Diagnóstico: cuántas alarmas crudas devolvió el servidor
+  console.log(`[EventsScreen] 📊 alarmRows crudas del servidor: ${alarmRows.length}`);
 
   // Transform raw alarms from server to standard visual layout
-  const realEvents: EventItem[] = alarmRows.map((row: any) => {
+  // ⚠️ FIX: Se eliminó el filtro "row.id !== undefined" que descartaba alarmas sin id explícito.
+  // Algunas alarmas del servidor pueden llegar con id=0 (falsy) o sin ese campo y se perdían.
+  const realEvents: EventItem[] = alarmRows
+    .filter((row: any) => row !== null && row !== undefined)
+    .map((row: any) => {
     let type = 'OBJECT';
     let objectName = 'Objeto';
     let minTime = '0.5s';
@@ -93,7 +147,8 @@ export default function EventsScreen() {
     }
 
     return {
-      id: row.id,
+      // ⚠️ FIX: Usar row.id ?? row.name como clave para no perder alarmas con id=0
+      id: row.id ?? row.name ?? Math.random(),
       name: row.name || 'Alerta Inteligente',
       type,
       devices: row.Detail_device_alarm?.length ?? 0,
@@ -106,7 +161,16 @@ export default function EventsScreen() {
     };
   });
 
-  const displayEvents: EventItem[] = (!domain || alarmRows.length === 0) ? MOCK_EVENTS : realEvents;
+  // Diagnóstico: cuántos eventos quedaron después del mapping
+  console.log(`[EventsScreen] ✅ realEvents mapeados: ${realEvents.length}`);
+
+  // ⚠️ FIX: La condición anterior usaba "!domain" que mostraba los 15 MOCK_EVENTS
+  // si el dominio activo no estaba presente, ignorando los datos reales ya cargados.
+  // Ahora solo usamos mocks si el servidor no devolvió absolutamente ninguna alarma real
+  // Y además no tenemos habilitada la consulta de sesión activa (para evitar data leaks de Realclub en cmarket).
+  const displayEvents: EventItem[] = (realEvents.length > 0 || queryEnabled) ? realEvents : MOCK_EVENTS;
+  const isMockData = (realEvents.length === 0 && !queryEnabled);
+  console.log(`[EventsScreen] 🖥️ Mostrando ${displayEvents.length} eventos (${isMockData ? 'MOCK' : 'REAL'})`);
 
   const filteredEvents = displayEvents.filter(ev =>
     ev.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -159,48 +223,53 @@ export default function EventsScreen() {
         </View>
 
         {/* LISTADO DE EVENTOS */}
-        {filteredEvents.map((event) => (
-          <TouchableOpacity
-            key={event.id}
-            style={styles.eventCard}
-            activeOpacity={0.8}
-            onPress={() => router.push({ pathname: '/(tabs)/event-config', params: { id: event.id } })}
-          >
-            {/* Contenido Izquierdo */}
-            <View style={styles.cardLeft}>
-              <View style={styles.iconBoxCamera}>
-                <Ionicons name="notifications" size={18} color="#0097FF" />
-              </View>
-              <View style={styles.cardInfo}>
-                <View style={styles.titleBadgeRow}>
+        {filteredEvents.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIconBox}>
+              <Ionicons name="notifications-off-outline" size={32} color="#0097FF" />
+            </View>
+            <Text style={styles.emptyText}>Sin eventos configurados</Text>
+            <Text style={styles.emptySubtext}>
+              No hay alarmas o reglas activas para la sucursal {workspaceName.toLowerCase()}.
+            </Text>
+          </View>
+        ) : (
+          filteredEvents.map((event) => (
+            <TouchableOpacity
+              key={event.id}
+              style={styles.eventCard}
+              activeOpacity={0.8}
+              onPress={() => router.push({ pathname: '/(tabs)/event-config', params: { id: event.id } })}
+            >
+              {/* Contenido Izquierdo */}
+              <View style={styles.cardLeft}>
+                <View style={styles.iconBoxCamera}>
+                  <Ionicons name="notifications" size={18} color="#0097FF" />
+                </View>
+                <View style={styles.cardInfo}>
                   <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
                     {event.name}
                   </Text>
-                  <View style={styles.typeBadge}>
-                    <Text style={styles.typeBadgeText}>
-                      {event.type === 'OBJECT' ? 'OBJETO' : event.type}
-                    </Text>
-                  </View>
+                  {/* Metadatos detallados de la Analítica */}
+                  <Text style={[styles.subtext, { marginTop: 4 }]}>
+                    Analítica: {event.type === 'OBJECT' ? 'OBJETO' : event.type}  •  Cámaras: {event.devices}  •  Conf: {event.params.prob}
+                  </Text>
                 </View>
-                {/* 1 Cámara asociada • Conf: 75% */}
-                <Text style={styles.subtext}>
-                  {event.devices} {event.devices === 1 ? 'Cámara asociada' : 'Cámaras asociadas'} • Conf: {event.params.prob}
-                </Text>
               </View>
-            </View>
 
-            {/* Contenido Derecho */}
-            <View style={styles.cardRight}>
-              <View style={styles.statusBadge}>
-                <View style={[styles.statusDot, { backgroundColor: event.active ? '#22C55E' : '#94A3B8' }]} />
-                <Text style={[styles.statusText, { color: event.active ? '#22C55E' : '#94A3B8' }]}>
-                  {event.active ? 'ACTIVO' : 'INACTIVO'}
-                </Text>
+              {/* Contenido Derecho */}
+              <View style={styles.cardRight}>
+                <View style={styles.statusBadge}>
+                  <View style={[styles.statusDot, { backgroundColor: event.active ? '#22C55E' : '#94A3B8' }]} />
+                  <Text style={[styles.statusText, { color: event.active ? '#22C55E' : '#94A3B8' }]}>
+                    {event.active ? 'ACTIVO' : 'INACTIVO'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#0097FF" />
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#0097FF" />
-            </View>
-          </TouchableOpacity>
-        ))}
+            </TouchableOpacity>
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -284,9 +353,8 @@ const styles = StyleSheet.create({
   },
   eventName: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-    maxWidth: '65%'
+    fontSize: 13,
+    fontWeight: '800'
   },
   typeBadge: {
     backgroundColor: '#0097FF15',
@@ -329,5 +397,38 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.2
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 50,
+    paddingHorizontal: 20,
+    backgroundColor: '#101424',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ffffff05',
+    marginTop: 10
+  },
+  emptyIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#0097FF10',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16
+  },
+  emptyText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  emptySubtext: {
+    color: '#94A3B8',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18
   }
 });

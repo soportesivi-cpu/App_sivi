@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Sivi_app",
+    "name": "Sivi",
     "slug": "AliceGuardianApp",
     "scheme": "aliceguardian",
     "version": "1.2",
@@ -13,7 +13,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
     },
     "android": {
       "versionCode": 3,
@@ -23,7 +28,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.soportesivi.AliceGuardianApp"
+      "package": "com.soportesivi.AliceGuardianApp",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -35,8 +41,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "b136a884-b4e1-4305-87cd-2a5aa5952459"
+        "projectId": "bdfb1d9a-7bc0-4572-abeb-42ea39601301"
       }
-    }
+    },
+    "owner": "sivisoporte"
   }
 }

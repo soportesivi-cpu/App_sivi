@@ -59,7 +59,7 @@ export default function AdminDashboard() {
         }
 
         if (isSuperAdmin && !impersonatedWorkspace) {
-          const res = await getWorkspaces();
+          const res = await getWorkspaces() as any;
           const wsList = Array.isArray(res) ? res : (res?.rows || []);
           setWorkspaces(wsList);
           setDashboardData(null);

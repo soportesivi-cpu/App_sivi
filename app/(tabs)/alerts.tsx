@@ -48,15 +48,12 @@ export default function AlertsScreen() {
   const isLocal = currentWs?.type === 'local';
 
   const activeSession = useMemo(() => {
-    if (isLocal) {
-      return [{ workspace: 'local', token: token || '' }];
-    }
     const wsId = currentWs?.id || currentWs?.workspace || '';
     const match = workspaceSessions?.find((s: any) => s.workspace?.toLowerCase() === wsId.toLowerCase());
     return match ? [match] : [];
-  }, [workspaceSessions, currentWs, isLocal, token]);
+  }, [workspaceSessions, currentWs]);
 
-  const [alerts, setAlerts]   = useState<Alert[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const devicesMapRef = useRef<Record<string, string>>({});
@@ -73,7 +70,7 @@ export default function AlertsScreen() {
   // States for Real-Time Popup
   const isFocused = useIsFocused();
   const isFocusedRef = useRef(isFocused);
-  
+
   const [realTimePopupAlert, setRealTimePopupAlert] = useState<Alert | null>(null);
   const popupAnim = useRef(new Animated.Value(-300)).current;
   const popupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -93,7 +90,7 @@ export default function AlertsScreen() {
   }, [popupAnim]);
 
   const triggerRealTimePopup = useCallback((alertItem: Alert) => {
-    playNotificationSound().catch(() => {});
+    playNotificationSound().catch(() => { });
 
     setRealTimePopupAlert(alertItem);
 
@@ -130,113 +127,88 @@ export default function AlertsScreen() {
   }, []);
 
   useEffect(() => {
+    wsService.disconnect();
     conectarWebSocket();
     return () => wsService.disconnect();
-  }, []);
+  }, [domain, activeSession]);
 
   useEffect(() => {
     cargarAlertas();
-  }, [activeSession, isLocal, domain]);
+  }, [activeSession, domain]);
 
   async function cargarAlertas() {
     try {
-      // 1. Consultar dispositivos del workspace activo para armar mapa de ID a Nombre real
+      // 1. Mapa de dispositivos — siempre via gateway
       let devicesMap: Record<string, string> = {};
       try {
-        const devsData = isLocal
-          ? await getDevices()
-          : (activeSession.length > 0 ? await getWorkspacesDevices(activeSession) : null);
-        const devsList = isLocal ? (devsData?.rows || []) : (devsData?.workspaces?.[0]?.devices || []);
-        
+        const devsData = await getWorkspacesDevices(activeSession);
+        const devsList = devsData?.workspaces?.[0]?.devices || [];
         devsList.forEach((d: any) => {
           const idStr = String(d.id);
           const devIdStr = d.deviceId ? String(d.deviceId) : '';
           if (d.name) {
             devicesMap[idStr] = d.name;
-            if (devIdStr) {
-              devicesMap[devIdStr] = d.name;
-            }
+            if (devIdStr) devicesMap[devIdStr] = d.name;
           }
         });
         devicesMapRef.current = devicesMap;
-        console.log(`[ALERTS] Mapa de dispositivos construido exitosamente:`, Object.keys(devicesMap).length, 'dispositivos');
       } catch (err) {
         console.log('Error construyendo mapa de dispositivos:', err);
       }
 
-      // 2. Obtener las alertas (locales o consolidadas en cloud)
-      let data: any = null;
-      if (isLocal) {
-        data = await getAlerts();
-      } else {
-        if (activeSession.length === 0) {
-          setAlerts([]);
-          return;
-        }
-
-        const toDate = new Date();
-        const fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
-
-        const formatLimaISO = (d: Date) => {
-          const options = {
-            timeZone: 'America/Lima',
-            year: 'numeric' as const,
-            month: '2-digit' as const,
-            day: '2-digit' as const,
-            hour: '2-digit' as const,
-            minute: '2-digit' as const,
-            second: '2-digit' as const,
-            hour12: false
-          };
-          const formatter = new Intl.DateTimeFormat('en-US', options);
-          const parts = formatter.formatToParts(d);
-          const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
-          return `${getVal('year')}-${getVal('month')}-${getVal('day')}T${getVal('hour')}:${getVal('minute')}:${getVal('second')}-05:00`;
-        };
-
-        const fromStr = formatLimaISO(fromDate);
-        const toStr = formatLimaISO(toDate);
-
-        console.log(`[ALERTS] Fetching workspace events from ${fromStr} to ${toStr}`);
-        data = await getWorkspacesEvents({
-          sessions: activeSession,
-          eventType: 'alert',
-          from: fromStr,
-          to: toStr,
-          timezone: 'America/Lima',
-          page: 1,
-          limit: 100
-        });
+      // 2. Alertas — siempre via gateway
+      if (activeSession.length === 0) {
+        setAlerts([]);
+        return;
       }
 
-      // 3. Mapear alertas cruzando con el mapa de dispositivos para resolver nombres exactos
+      const toDate = new Date();
+      const fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
+
+      const formatLimaISO = (d: Date) => {
+        const options = {
+          timeZone: 'America/Lima',
+          year: 'numeric' as const, month: '2-digit' as const, day: '2-digit' as const,
+          hour: '2-digit' as const, minute: '2-digit' as const, second: '2-digit' as const,
+          hour12: false
+        };
+        const formatter = new Intl.DateTimeFormat('en-US', options);
+        const parts = formatter.formatToParts(d);
+        const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
+        return `${getVal('year')}-${getVal('month')}-${getVal('day')}T${getVal('hour')}:${getVal('minute')}:${getVal('second')}-05:00`;
+      };
+
+      const data = await getWorkspacesEvents({
+        sessions: activeSession,
+        eventType: 'alert',
+        from: formatLimaISO(fromDate),
+        to: formatLimaISO(toDate),
+        timezone: 'America/Lima',
+        page: 1,
+        limit: 100
+      });
+
+      // 3. Cruzar con mapa de dispositivos
       const rawRows = data?.rows || [];
       const mappedRows = rawRows.map((alert: any) => {
         const devId = alert.device_id || alert.deviceId || alert.device?.id || alert.device?.deviceId;
         let matchedName = '';
-        if (devId && devicesMap[String(devId)]) {
-          matchedName = devicesMap[String(devId)];
-        }
-        
+        if (devId && devicesMap[String(devId)]) matchedName = devicesMap[String(devId)];
         if (!matchedName && alert.device?.name && alert.device.name !== 'Cámara' && alert.device.name !== 'Cámara Principal') {
           matchedName = alert.device.name;
         }
-
         if (!matchedName) {
-          if (alert.motive_categorie && alert.motive_categorie !== 'Alert' && alert.motive_categorie.includes('_')) {
-            matchedName = alert.motive_categorie;
-          } else if (alert.title && alert.title !== 'Alert' && alert.title.includes('_')) {
-            matchedName = alert.title;
-          }
+          if (alert.motive_categorie && alert.motive_categorie !== 'Alert' && alert.motive_categorie.includes('_')) matchedName = alert.motive_categorie;
+          else if (alert.title && alert.title !== 'Alert' && alert.title.includes('_')) matchedName = alert.title;
         }
 
-        const finalName = matchedName || 'Cámara';
+        // INTERVENCIÓN QUIRÚRGICA: Normaliza el nombre de la alerta igual que en el WebSocket
+        const normalizedMotive = alert.motive_categorie || alert.motive || alert.title || alert.label || alert.name || getTrueAlertName(alert.tag || 'alert');
+
         return {
           ...alert,
-          device: {
-            ...alert.device,
-            name: finalName
-          }
+          motive_categorie: normalizedMotive, // Asegura que siempre viaje un nombre válido
+          device: { ...alert.device, name: matchedName || 'Cámara' }
         };
       });
 
@@ -282,7 +254,10 @@ export default function AlertsScreen() {
         if (devId && devicesMapRef.current[String(devId)]) {
           possibleName = devicesMapRef.current[String(devId)];
         }
-        
+
+
+
+
         let motive_categorie = rawData.motive_categorie || rawData.motive || rawData.title || rawData.label || rawData.name || undefined;
 
         if (possibleName !== 'Cámara') {
@@ -306,6 +281,8 @@ export default function AlertsScreen() {
 
         const device = rawDev && typeof rawDev === 'object' ? { ...rawDev, name: possibleName } : { name: possibleName };
 
+
+
         let face_detected_url = undefined;
         if (typeof rawData.face_detected_url === 'string') {
           face_detected_url = rawData.face_detected_url;
@@ -313,7 +290,7 @@ export default function AlertsScreen() {
 
         let fc = rawData.facecropping;
         if (typeof fc === 'string' && fc.trim().startsWith('[')) {
-          try { fc = JSON.parse(fc); } catch (e) {}
+          try { fc = JSON.parse(fc); } catch (e) { }
         }
         if (Array.isArray(fc) && fc.length > 0) {
           const first = fc[0];
@@ -378,35 +355,35 @@ export default function AlertsScreen() {
   }
 
   function formatHora(fecha: string) {
-    if(!fecha) return '--:--';
+    if (!fecha) return '--:--';
     return parseUTCDate(fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
   }
 
   function formatFechaPrecisa(fecha: string) {
-    if(!fecha) return '--';
-    return parseUTCDate(fecha).toLocaleString('es-PE', { 
-       month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' 
+    if (!fecha) return '--';
+    return parseUTCDate(fecha).toLocaleString('es-PE', {
+      month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
   }
 
   function getAnalyticTheme(tag: string) {
     const t = (tag || '').toLowerCase();
     if (t.includes('fire') || t.includes('fuego') || t.includes('weapon') || t.includes('arma') || t.includes('crítica') || t.includes('critical')) {
-      return { color: '#f44336', icon: 'flame', label: 'CRÍTICA' }; 
+      return { color: '#f44336', icon: 'flame', label: 'CRÍTICA' };
     }
     if (t.includes('lpr') || t.includes('plate') || t.includes('placa') || t.includes('car')) {
-      return { color: '#03a9f4', icon: 'car', label: 'VEHÍCULO' }; 
+      return { color: '#03a9f4', icon: 'car', label: 'VEHÍCULO' };
     }
     if (t.includes('face') || t.includes('rostro')) {
-      return { color: '#4caf50', icon: 'person', label: 'ROSTRO' }; 
+      return { color: '#4caf50', icon: 'person', label: 'ROSTRO' };
     }
     if (t.includes('count') || t.includes('aforo') || t.includes('people')) {
       return { color: '#9c27b0', icon: 'people', label: 'MÉTRICA' };
     }
     if (t.includes('zone') || t.includes('zona') || t.includes('intrus') || t.includes('motion') || t.includes('movimiento')) {
-      return { color: '#ff9800', icon: 'warning', label: 'INTRUSIÓN' }; 
+      return { color: '#ff9800', icon: 'warning', label: 'INTRUSIÓN' };
     }
-    return { color: '#2196f3', icon: 'scan', label: 'ACTIVO' }; 
+    return { color: '#2196f3', icon: 'scan', label: 'ACTIVO' };
   }
 
   function getEvidenceUrl(item: Alert) {
@@ -416,181 +393,129 @@ export default function AlertsScreen() {
 
 
   async function handleQuickAction(alertItem: Alert, action: 'CONFIRM' | 'FALSE_POSITIVE' | 'IGNORE') {
-     const originalAlerts = [...alerts];
-     const originalSelectedAlert = selectedAlert ? { ...selectedAlert } : null;
+    const originalAlerts = [...alerts];
+    const originalSelectedAlert = selectedAlert ? { ...selectedAlert } : null;
 
-     // 1. Optimistic Update
-     setAlerts(prev => prev.map(a => {
-       if (a.id === alertItem.id) {
-         return {
-           ...a,
-           is_confirmed: action === 'CONFIRM' ? true : action === 'FALSE_POSITIVE' ? false : null,
-           state: action === 'IGNORE' ? 'ignored' : 'resolved'
-         };
-       }
-       return a;
-     }));
+    // 1. Optimistic Update
+    setAlerts(prev => prev.map(a => {
+      if (a.id === alertItem.id) {
+        return {
+          ...a,
+          is_confirmed: action === 'CONFIRM' ? true : action === 'FALSE_POSITIVE' ? false : null,
+          state: action === 'IGNORE' ? 'ignored' : 'resolved'
+        };
+      }
+      return a;
+    }));
 
-     if (selectedAlert && selectedAlert.id === alertItem.id) {
+    if (selectedAlert && selectedAlert.id === alertItem.id) {
+      setSelectedAlert(prev => prev ? {
+        ...prev,
+        is_confirmed: action === 'CONFIRM' ? true : action === 'FALSE_POSITIVE' ? false : null,
+        state: action === 'IGNORE' ? 'ignored' : 'resolved'
+      } : null);
+    }
+
+    // 2. Async Sync — siempre via gateway orquestador
+    let incidentRes: any = null;
+    try {
+      const gateClassification = action === 'CONFIRM' ? 'confirm' : action === 'FALSE_POSITIVE' ? 'false_positive' : 'ignore';
+      console.log(`[API SYNC] 🚀 Clasificando alerta ID ${alertItem.id} — ${gateClassification}`);
+      incidentRes = await classifyWorkspacesEvent({
+        sessions: activeSession,
+        eventType: 'alert',
+        eventId: alertItem.id,
+        classification: gateClassification
+      });
+      console.log(`[API SYNC] ✅ Alerta ID ${alertItem.id} clasificada:`, incidentRes);
+    } catch (error) {
+      console.error(`[API SYNC] ❌ Fallo al clasificar alerta ${alertItem.id}:`, error);
+      setAlerts(originalAlerts);
+      setSelectedAlert(originalSelectedAlert);
+      RNAlert.alert('Error de Sincronización', 'No se pudo guardar la clasificación. Verifica tu conexión.');
+      return;
+    }
+
+    if (incidentRes && incidentRes.id) {
+      const incidentId = Number(incidentRes.id);
+      const incidentName = incidentRes.name || (action === 'CONFIRM' ? 'Manual Confirmation' : action === 'FALSE_POSITIVE' ? 'False Positive' : 'Ignore Alert');
+
+      setAlerts(prev => prev.map(a => {
+        if (a.id === alertItem.id) {
+          return {
+            ...a,
+            incidentId,
+            incidentName,
+            sentDescriptions: a.sentDescriptions || []
+          };
+        }
+        return a;
+      }));
+
+      if (selectedAlert && selectedAlert.id === alertItem.id) {
         setSelectedAlert(prev => prev ? {
-           ...prev,
-           is_confirmed: action === 'CONFIRM' ? true : action === 'FALSE_POSITIVE' ? false : null,
-           state: action === 'IGNORE' ? 'ignored' : 'resolved'
+          ...prev,
+          incidentId,
+          incidentName,
+          sentDescriptions: prev.sentDescriptions || []
         } : null);
-     }
-
-     // 2. Async Sync SIVI Server
-     let incidentRes: any = null;
-     if (!isLocal) {
-        try {
-           console.log(`[API SYNC] 🚀 Sincronizando clasificación ${action} consolidada de alerta ID ${alertItem.id} con el orquestador...`);
-           const gateClassification = action === 'CONFIRM' ? 'confirm' : action === 'FALSE_POSITIVE' ? 'false_positive' : 'ignore';
-           incidentRes = await classifyWorkspacesEvent({
-              sessions: activeSession,
-              eventType: 'alert',
-              eventId: alertItem.id,
-              classification: gateClassification
-           });
-           console.log(`[API SYNC] ✅ Alerta ID ${alertItem.id} clasificada con éxito en orquestador:`, incidentRes);
-        } catch (error) {
-           console.error(`[API SYNC] ❌ Fallo al clasificar alerta ${alertItem.id} en orquestador:`, error);
-           setAlerts(originalAlerts);
-           setSelectedAlert(originalSelectedAlert);
-           RNAlert.alert(
-              'Error de Sincronización',
-              'No se pudo guardar la clasificación de la alerta en el servidor orquestador. Por favor, verifica tu conexión.'
-           );
-           return;
-        }
-     } else {
-        if (action === 'CONFIRM') {
-           try {
-              console.log(`[API SYNC] 🚀 Sincronizando confirmación manual de alerta ID ${alertItem.id} con el servidor...`);
-              incidentRes = await confirmAlert(alertItem.id);
-              console.log(`[API SYNC] ✅ Alerta ID ${alertItem.id} confirmada con éxito en SIVI:`, incidentRes);
-           } catch (error) {
-              console.error(`[API SYNC] ❌ Fallo al confirmar alerta ${alertItem.id} en el servidor:`, error);
-              setAlerts(originalAlerts);
-              setSelectedAlert(originalSelectedAlert);
-              RNAlert.alert(
-                 'Error de Sincronización',
-                 'No se pudo guardar la confirmación de la alerta en el servidor SIVI local. Por favor, verifica tu conexión.'
-              );
-              return;
-           }
-        } else if (action === 'FALSE_POSITIVE') {
-           try {
-              console.log(`[API SYNC] 🚀 Sincronizando registro de Falso Positivo de alerta ID ${alertItem.id} con el servidor...`);
-              incidentRes = await falsePositiveAlert(alertItem.id);
-              console.log(`[API SYNC] ✅ Alerta ID ${alertItem.id} marcada como Falso Positivo con éxito en SIVI:`, incidentRes);
-           } catch (error) {
-              console.error(`[API SYNC] ❌ Fallo al registrar Falso Positivo de alerta ${alertItem.id} en el servidor:`, error);
-              setAlerts(originalAlerts);
-              setSelectedAlert(originalSelectedAlert);
-              RNAlert.alert(
-                 'Error de Sincronización',
-                 'No se pudo guardar el registro de Falso Positivo en el servidor SIVI local. Por favor, verifica tu conexión.'
-              );
-              return;
-           }
-        } else if (action === 'IGNORE') {
-           try {
-              console.log(`[API SYNC] 🚀 Sincronizando registro de Ignorar Alerta ID ${alertItem.id} con el servidor...`);
-              incidentRes = await ignoreAlert(alertItem.id);
-              console.log(`[API SYNC] ✅ Alerta ID ${alertItem.id} marcada como Ignorada con éxito en SIVI:`, incidentRes);
-           } catch (error) {
-              console.error(`[API SYNC] ❌ Fallo al ignorar alerta ${alertItem.id} en el servidor:`, error);
-              setAlerts(originalAlerts);
-              setSelectedAlert(originalSelectedAlert);
-              RNAlert.alert(
-                 'Error de Sincronización',
-                 'No se pudo guardar el registro de Ignorar Alerta en el servidor SIVI local. Por favor, verifica tu conexión.'
-              );
-              return;
-           }
-        }
-     }
-
-     if (incidentRes && incidentRes.id) {
-        const incidentId = Number(incidentRes.id);
-        const incidentName = incidentRes.name || (action === 'CONFIRM' ? 'Manual Confirmation' : action === 'FALSE_POSITIVE' ? 'False Positive' : 'Ignore Alert');
-
-        setAlerts(prev => prev.map(a => {
-           if (a.id === alertItem.id) {
-              return {
-                 ...a,
-                 incidentId,
-                 incidentName,
-                 sentDescriptions: a.sentDescriptions || []
-              };
-           }
-           return a;
-        }));
-
-        if (selectedAlert && selectedAlert.id === alertItem.id) {
-           setSelectedAlert(prev => prev ? {
-              ...prev,
-              incidentId,
-              incidentName,
-              sentDescriptions: prev.sentDescriptions || []
-           } : null);
-        }
-     }
+      }
+    }
   }
 
   async function handleSendNote() {
-     if (!noteText.trim() || !selectedAlert) return;
-     
-     const eventId = selectedAlert.id;
-     const incidentId = selectedAlert.incidentId ?? Math.floor(Math.random() * 100000) + 50000;
-     const incidentName = selectedAlert.incidentName ?? (selectedAlert.is_confirmed === true ? 'Manual Confirmation' : selectedAlert.is_confirmed === false ? 'False Positive' : 'Ignore Alert');
+    if (!noteText.trim() || !selectedAlert) return;
 
-     setSendingNote(true);
+    const eventId = selectedAlert.id;
+    const incidentId = selectedAlert.incidentId ?? Math.floor(Math.random() * 100000) + 50000;
+    const incidentName = selectedAlert.incidentName ?? (selectedAlert.is_confirmed === true ? 'Manual Confirmation' : selectedAlert.is_confirmed === false ? 'False Positive' : 'Ignore Alert');
 
-     try {
-        console.log(`[API DESCRIPTION] 🚀 Sincronizando nota de incidente ID ${incidentId} con el servidor...`);
-        const response = await addIncidentDescription({
-           eventId,
-           incidentId,
-           name: incidentName,
-           description: noteText.trim()
-        });
+    setSendingNote(true);
 
-        // Formato para mostrar fecha y hora actual en la nota
-        const formattedDate = new Date().toLocaleDateString('es-PE', { month: 'short', day: 'numeric', year: 'numeric' });
-        const formattedTime = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        const timestampStr = `${formattedDate}, ${formattedTime}`;
+    try {
+      console.log(`[API DESCRIPTION] 🚀 Sincronizando nota de incidente ID ${incidentId} con el servidor...`);
+      const response = await addIncidentDescription({
+        eventId,
+        incidentId,
+        name: incidentName,
+        description: noteText.trim()
+      });
 
-        const newDescription = {
-           id: response?.id || Math.floor(Math.random() * 1000000),
-           username: userData?.Username || 'admin',
-           description: noteText.trim(),
-           timestamp: timestampStr
-        };
+      // Formato para mostrar fecha y hora actual en la nota
+      const formattedDate = new Date().toLocaleDateString('es-PE', { month: 'short', day: 'numeric', year: 'numeric' });
+      const formattedTime = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+      const timestampStr = `${formattedDate}, ${formattedTime}`;
 
-        setSelectedAlert(prev => prev ? {
-           ...prev,
-           sentDescriptions: [...(prev.sentDescriptions || []), newDescription]
-        } : null);
+      const newDescription = {
+        id: response?.id || Math.floor(Math.random() * 1000000),
+        username: userData?.Username || 'admin',
+        description: noteText.trim(),
+        timestamp: timestampStr
+      };
 
-        setAlerts(prev => prev.map(a => {
-           if (a.id === eventId) {
-              return {
-                 ...a,
-                 sentDescriptions: [...(a.sentDescriptions || []), newDescription]
-              };
-           }
-           return a;
-        }));
+      setSelectedAlert(prev => prev ? {
+        ...prev,
+        sentDescriptions: [...(prev.sentDescriptions || []), newDescription]
+      } : null);
 
-        setNoteText('');
-        console.log('[API DESCRIPTION] ✅ Nota enviada y guardada correctamente.');
-     } catch (error) {
-        console.error('[API DESCRIPTION] ❌ Error al enviar nota:', error);
-        RNAlert.alert('Fallo de Sincronización', 'No se pudo registrar la nota en el servidor SIVI local. Por favor, verifica tu conexión.');
-     } finally {
-        setSendingNote(false);
-     }
+      setAlerts(prev => prev.map(a => {
+        if (a.id === eventId) {
+          return {
+            ...a,
+            sentDescriptions: [...(a.sentDescriptions || []), newDescription]
+          };
+        }
+        return a;
+      }));
+
+      setNoteText('');
+      console.log('[API DESCRIPTION] ✅ Nota enviada y guardada correctamente.');
+    } catch (error) {
+      console.error('[API DESCRIPTION] ❌ Error al enviar nota:', error);
+      RNAlert.alert('Fallo de Sincronización', 'No se pudo registrar la nota en el servidor SIVI local. Por favor, verifica tu conexión.');
+    } finally {
+      setSendingNote(false);
+    }
   }
 
   if (loading) {
@@ -615,16 +540,16 @@ export default function AlertsScreen() {
           <Ionicons name="shield-checkmark" size={20} color="#2E9BFF" />
           <Text style={styles.logoText}>SIVI</Text>
         </View>
-        
-        <TouchableOpacity 
-          style={styles.toggleViewBtn} 
+
+        <TouchableOpacity
+          style={styles.toggleViewBtn}
           activeOpacity={0.8}
           onPress={() => setViewMode(prev => prev === 'grid' ? 'list' : 'grid')}
         >
-          <Ionicons 
-            name={viewMode === 'grid' ? "list-outline" : "grid-outline"} 
-            size={20} 
-            color="#fff" 
+          <Ionicons
+            name={viewMode === 'grid' ? "list-outline" : "grid-outline"}
+            size={20}
+            color="#fff"
           />
         </TouchableOpacity>
       </View>
@@ -632,7 +557,7 @@ export default function AlertsScreen() {
       {/* TITULO DE GESTION */}
       <View style={styles.titleContainer}>
         <Text style={styles.tituloGestion}>Gestión de Alertas</Text>
-        
+
         {/* CAPSULA DE CONTEO */}
         <View style={styles.capsuleBadge}>
           <View style={styles.capsuleDot} />
@@ -668,18 +593,18 @@ export default function AlertsScreen() {
         renderItem={({ item }) => {
           const typeTag = item.motive_categorie || item.tag || 'Detección General';
           const theme = getAnalyticTheme(typeTag);
-          
+
           const probNum = Number(item.probability) || 0;
           const prob = probNum > 1 ? probNum : probNum * 100;
-          
+
           const isResolved = item.is_confirmed === true || item.is_confirmed === false || item.state === 'resolved' || item.state === 'ignored';
-          
+
           if (viewMode === 'grid') {
             return (
-              <TouchableOpacity 
-                 style={styles.gridCard}
-                 activeOpacity={0.8}
-                 onPress={() => setSelectedAlert(item)}
+              <TouchableOpacity
+                style={styles.gridCard}
+                activeOpacity={0.8}
+                onPress={() => setSelectedAlert(item)}
               >
                 {/* Header interno del card */}
                 <View style={styles.gridCardHeader}>
@@ -690,8 +615,8 @@ export default function AlertsScreen() {
                 </View>
 
                 {/* Evidencia del card */}
-                <Image 
-                  source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }} 
+                <Image
+                  source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
                   style={styles.gridCardImage}
                   resizeMode="cover"
                 />
@@ -716,40 +641,40 @@ export default function AlertsScreen() {
 
           // viewMode === 'list' (Diseño original detallado en feed único)
           return (
-            <TouchableOpacity 
-               style={[styles.card, { borderColor: theme.color + '40' }]}
-               activeOpacity={0.8}
-               onPress={() => setSelectedAlert(item)}
+            <TouchableOpacity
+              style={[styles.card, { borderColor: theme.color + '40' }]}
+              activeOpacity={0.8}
+              onPress={() => setSelectedAlert(item)}
             >
-              <ImageBackground 
-                  source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }} 
-                  style={styles.cardImage}
-                  imageStyle={{ opacity: 0.8 }}
+              <ImageBackground
+                source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
+                style={styles.cardImage}
+                imageStyle={{ opacity: 0.8 }}
               >
-                 <View style={styles.cardOverlayTop}>
-                    <View style={[styles.badge, { backgroundColor: isResolved ? (item.is_confirmed === true ? '#4caf50' : item.is_confirmed === false ? '#ff9800' : '#ffffff60') : '#2196f3' }]}>
-                       <Text style={styles.badgeText}>
-                         {isResolved ? (item.is_confirmed === true ? 'CONFIRMADA' : item.is_confirmed === false ? 'FALSO POS.' : 'IGNORADA') : 'PENDIENTE'}
-                       </Text>
-                    </View>
-                 </View>
+                <View style={styles.cardOverlayTop}>
+                  <View style={[styles.badge, { backgroundColor: isResolved ? (item.is_confirmed === true ? '#4caf50' : item.is_confirmed === false ? '#ff9800' : '#ffffff60') : '#2196f3' }]}>
+                    <Text style={styles.badgeText}>
+                      {isResolved ? (item.is_confirmed === true ? 'CONFIRMADA' : item.is_confirmed === false ? 'FALSO POS.' : 'IGNORADA') : 'PENDIENTE'}
+                    </Text>
+                  </View>
+                </View>
               </ImageBackground>
-              
+
               <View style={styles.cardFooter}>
-                 <View style={styles.footerRow}>
-                    <View style={styles.footerInfo}>
-                       <Text style={[styles.cardTipo, { color: theme.color }]}>
-                          <Ionicons name={theme.icon as any} size={14}/> {typeTag.toUpperCase()}
-                       </Text>
-                       <Text style={styles.cardCam} numberOfLines={1}>
-                          {item.device?.name || item.deviceId || 'Cámara no especificada'}
-                       </Text>
-                    </View>
-                    <View style={styles.footerMetrics}>
-                       <Text style={styles.cardHora}>{formatHora(item.createdAt)}</Text>
-                       <Text style={styles.cardProb}>{prob.toFixed(0)}%</Text>
-                    </View>
-                 </View>
+                <View style={styles.footerRow}>
+                  <View style={styles.footerInfo}>
+                    <Text style={[styles.cardTipo, { color: theme.color }]}>
+                      <Ionicons name={theme.icon as any} size={14} /> {typeTag.toUpperCase()}
+                    </Text>
+                    <Text style={styles.cardCam} numberOfLines={1}>
+                      {item.device?.name || item.deviceId || 'Cámara no especificada'}
+                    </Text>
+                  </View>
+                  <View style={styles.footerMetrics}>
+                    <Text style={styles.cardHora}>{formatHora(item.createdAt)}</Text>
+                    <Text style={styles.cardProb}>{prob.toFixed(0)}%</Text>
+                  </View>
+                </View>
               </View>
             </TouchableOpacity>
           );
@@ -774,7 +699,7 @@ export default function AlertsScreen() {
       >
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
-            
+
             {/* Cabecera del Modal (Mockup) */}
             <View style={styles.modalHeaderMockup}>
               <View style={styles.modalHeaderLeft}>
@@ -783,12 +708,12 @@ export default function AlertsScreen() {
                   {selectedAlert ? formatFechaPrecisa(selectedAlert.createdAt) : ''}
                 </Text>
               </View>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 onPress={() => {
                   setSelectedAlert(null);
                   setIsZoomVisible(false);
-                }} 
+                }}
                 style={styles.modalHeaderCloseBtn}
               >
                 <Ionicons name="close" size={18} color="#fff" />
@@ -796,197 +721,198 @@ export default function AlertsScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
-               {/* Evidencia Fotográfica con overlay e interactividad de Zoom */}
-               {selectedAlert && (
-                 <View style={styles.evidenceContainerMockup}>
-                    <Text style={styles.evidenceLabelTitle}>EVIDENCIA</Text>
-                    <TouchableOpacity 
-                      activeOpacity={0.9} 
-                      style={styles.evidenceImageWrapper}
-                      onPress={() => setIsZoomVisible(true)}
-                    >
-                      <Image 
-                         source={{ uri: getEvidenceUrl(selectedAlert) || undefined }} 
-                         style={styles.evidenceImageMockup}
-                         resizeMode="cover"
-                      />
-                      <View style={styles.evidenceCamOverlay}>
-                        <Text style={styles.evidenceCamOverlayText} numberOfLines={1}>
-                          {(selectedAlert.device?.name || 'Cámara').toUpperCase()}
+              {/* Evidencia Fotográfica con overlay e interactividad de Zoom */}
+              {selectedAlert && (
+                <View style={styles.evidenceContainerMockup}>
+                  <Text style={styles.evidenceLabelTitle}>EVIDENCIA</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={styles.evidenceImageWrapper}
+                    onPress={() => setIsZoomVisible(true)}
+                  >
+                    <Image
+                      source={{ uri: getEvidenceUrl(selectedAlert) || undefined }}
+                      style={styles.evidenceImageMockup}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.evidenceCamOverlay}>
+                      <Text style={styles.evidenceCamOverlayText} numberOfLines={1}>
+                        {(selectedAlert.device?.name || 'Cámara').toUpperCase()}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Datasheet 2x2 (Grid de 4 tarjetas) */}
+              {selectedAlert && (() => {
+                const probNum = Number(selectedAlert.probability) || 0;
+                const prob = probNum > 1 ? probNum : probNum * 100;
+
+                return (
+                  <View style={styles.gridContainer2x2}>
+                    {/* Dispositivo (Expandido a ancho completo) */}
+                    <View style={[styles.infoFullCard, { marginBottom: 10 }]}>
+                      <Text style={styles.gridItemLabel}>DISPOSITIVO</Text>
+                      <Text style={styles.gridItemVal} numberOfLines={1}>
+                        {selectedAlert.device?.name || 'Cámara'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.gridRow2x2}>
+                      {/* Probabilidad */}
+                      <View style={styles.gridItemCard}>
+                        <Text style={styles.gridItemLabel}>PROBABILIDAD</Text>
+                        <Text style={[styles.gridItemVal, { color: '#4caf50' }]}>
+                          {prob.toFixed(0)}%
                         </Text>
                       </View>
-                    </TouchableOpacity>
-                 </View>
-               )}
-
-               {/* Datasheet 2x2 (Grid de 4 tarjetas) */}
-               {selectedAlert && (() => {
-                  const probNum = Number(selectedAlert.probability) || 0;
-                  const prob = probNum > 1 ? probNum : probNum * 100;
-                  
-                  return (
-                    <View style={styles.gridContainer2x2}>
-                       {/* Dispositivo (Expandido a ancho completo) */}
-                       <View style={[styles.infoFullCard, { marginBottom: 10 }]}>
-                          <Text style={styles.gridItemLabel}>DISPOSITIVO</Text>
-                          <Text style={styles.gridItemVal} numberOfLines={1}>
-                             {selectedAlert.device?.name || 'Cámara'}
-                          </Text>
-                       </View>
-
-                       <View style={styles.gridRow2x2}>
-                          {/* Probabilidad */}
-                          <View style={styles.gridItemCard}>
-                             <Text style={styles.gridItemLabel}>PROBABILIDAD</Text>
-                             <Text style={[styles.gridItemVal, { color: '#4caf50' }]}>
-                                {prob.toFixed(0)}%
-                             </Text>
-                          </View>
-                          {/* Fecha */}
-                          <View style={styles.gridItemCard}>
-                             <Text style={styles.gridItemLabel}>FECHA DE ALERTA</Text>
-                             <Text style={styles.gridItemVal} numberOfLines={1}>
-                                {selectedAlert ? formatFechaPrecisa(selectedAlert.createdAt) : ''}
-                             </Text>
-                          </View>
-                       </View>
+                      {/* Fecha */}
+                      <View style={styles.gridItemCard}>
+                        <Text style={styles.gridItemLabel}>FECHA DE ALERTA</Text>
+                        <Text style={styles.gridItemVal} numberOfLines={1}>
+                          {selectedAlert ? formatFechaPrecisa(selectedAlert.createdAt) : ''}
+                        </Text>
+                      </View>
                     </View>
-                  );
-               })()}
+                  </View>
+                );
+              })()}
 
-               {/* Sección INFORMACIÓN DE ALERTA */}
-               {selectedAlert && (() => {
-                  let vinfoObj: any = {};
-                  if (selectedAlert.vinfo) {
-                    try {
-                      vinfoObj = typeof selectedAlert.vinfo === 'string' ? JSON.parse(selectedAlert.vinfo) : selectedAlert.vinfo;
-                    } catch (e) {
-                      vinfoObj = {};
-                    }
+              {/* Sección INFORMACIÓN DE ALERTA */}
+              {selectedAlert && (() => {
+                let vinfoObj: any = {};
+                if (selectedAlert.vinfo) {
+                  try {
+                    vinfoObj = typeof selectedAlert.vinfo === 'string' ? JSON.parse(selectedAlert.vinfo) : selectedAlert.vinfo;
+                  } catch (e) {
+                    vinfoObj = {};
                   }
-                  
-                  const alarmName = selectedAlert.motive_categorie || vinfoObj?.alarm_name || selectedAlert.name_categorie || 'Alerta de Seguridad';
-                  const scheduleVal = vinfoObj?.schedule || "00:00:00 - 23:59:00";
-                  const intervalVal = vinfoObj?.interval || "daily";
-                  
-                  return (
-                    <View style={styles.infoSectionMockup}>
-                       <Text style={styles.infoSectionTitle}>INFORMACIÓN DE ALERTA</Text>
-                       
-                       {/* Nombre de la Alarma (Full width) */}
-                       <View style={styles.infoFullCard}>
-                          <Text style={styles.infoItemLabel}>NOMBRE DE LA ALARMA</Text>
-                          <Text style={styles.infoItemVal}>{alarmName}</Text>
-                       </View>
+                }
 
-                       {/* Calendario & Intervalo (2 Columnas) */}
-                       <View style={styles.gridRow2x2}>
-                          <View style={styles.gridItemCard}>
-                             <Text style={styles.gridItemLabel}>CALENDARIO</Text>
-                             <Text style={styles.gridItemVal}>{scheduleVal}</Text>
-                          </View>
-                          <View style={styles.gridItemCard}>
-                             <Text style={styles.gridItemLabel}>INTERVALO</Text>
-                             <Text style={styles.gridItemVal}>{intervalVal}</Text>
-                          </View>
-                       </View>
-                    </View>
-                  );
-               })()}
+                const alarmName = selectedAlert.name_categorie || vinfoObj?.alarm_name || vinfoObj?.alarmName || selectedAlert.motive_categorie || (selectedAlert as any).title || (selectedAlert as any).motive || selectedAlert.tag || 'Alerta de Seguridad';
 
-               {/* Acciones de Resolución o Registro de Minutas */}
-               {selectedAlert && (() => {
-                  const isResolved = selectedAlert.is_confirmed === true || selectedAlert.is_confirmed === false || selectedAlert.state === 'resolved' || selectedAlert.state === 'ignored';
-                  const resolvedLabel = selectedAlert.is_confirmed === true ? 'ALERTA CONFIRMADA' : selectedAlert.is_confirmed === false ? 'FALSO POSITIVO' : 'ALERTA IGNORADA';
-                  const resolvedColor = selectedAlert.is_confirmed === true ? '#4CAF50' : selectedAlert.is_confirmed === false ? '#FF9800' : '#ffffff60';
-                  
-                  return (
-                    <View style={styles.resolutionSectionMockup}>
-                       <Text style={styles.resolutionSectionTitle}>RESOLUCIÓN DE SEGURIDAD</Text>
-                       
-                       {isResolved ? (
-                          <View style={styles.resolvedContainerMockup}>
-                             {/* Status Badge */}
-                             <View style={[styles.resolvedHeaderBadge, { backgroundColor: resolvedColor + '18', borderColor: resolvedColor + '40' }]}>
-                                <Ionicons name="shield-checkmark" size={16} color={resolvedColor} style={{ marginRight: 6 }} />
-                                <Text style={[styles.resolvedHeaderBadgeText, { color: resolvedColor }]}>{resolvedLabel}</Text>
-                             </View>
-  
-                             {/* Input Box para Nota/Minuta */}
-                             <View style={styles.minutaInputSection}>
-                                <Text style={styles.minutaLabel}>REGISTRO DE MINUTA / BITÁCORA</Text>
-                                <View style={styles.minutaInputRow}>
-                                   <TextInput
-                                      placeholder="Escribe una descripción del incidente..."
-                                      placeholderTextColor="#ffffff30"
-                                      multiline
-                                      style={styles.minutaInput}
-                                      value={noteText}
-                                      onChangeText={setNoteText}
-                                   />
-                                   <TouchableOpacity 
-                                      style={[styles.minutaSendBtn, !noteText.trim() && { opacity: 0.5 }]} 
-                                      onPress={handleSendNote}
-                                      disabled={sendingNote || !noteText.trim()}
-                                   >
-                                      {sendingNote ? (
-                                         <ActivityIndicator size="small" color="#fff" />
-                                      ) : (
-                                         <Ionicons name="send" size={16} color="#fff" />
-                                      )}
-                                   </TouchableOpacity>
-                                </View>
-                             </View>
-  
-                             {/* Notas Enviadas dinámicamente en esta sesión */}
-                             {selectedAlert.sentDescriptions && selectedAlert.sentDescriptions.length > 0 ? (
-                                <View style={styles.sentNotesList}>
-                                   {selectedAlert.sentDescriptions.map((note) => (
-                                      <View key={note.id} style={styles.sentNoteCard}>
-                                         <View style={styles.sentNoteHeader}>
-                                            <View style={styles.sentNoteUserBadge}>
-                                               <Text style={styles.sentNoteUserText}>{note.username}</Text>
-                                            </View>
-                                            <Text style={styles.sentNoteTimeText}>{note.timestamp}</Text>
-                                         </View>
-                                         <Text style={styles.sentNoteBodyText}>{note.description}</Text>
-                                      </View>
-                                   ))}
-                                </View>
-                             ) : null}
-                          </View>
-                       ) : (
-                          <View style={styles.modalActionSectionMockup}>
-                             <View style={styles.modalActionsRowMockup}>
-                                <TouchableOpacity 
-                                   style={[styles.modalActionBtnMockup, { backgroundColor: '#4CAF50' }]} 
-                                   onPress={() => handleQuickAction(selectedAlert, 'CONFIRM')}
-                                >
-                                   <Ionicons name="checkmark-circle" size={16} color="#fff" style={{ marginRight: 4 }} />
-                                   <Text style={styles.modalActionBtnTextMockup}>CONFIRMAR</Text>
-                                </TouchableOpacity>
-  
-                                <TouchableOpacity 
-                                   style={[styles.modalActionBtnMockup, { backgroundColor: '#FF9800' }]} 
-                                   onPress={() => handleQuickAction(selectedAlert, 'FALSE_POSITIVE')}
-                                >
-                                   <Ionicons name="alert-circle" size={16} color="#fff" style={{ marginRight: 4 }} />
-                                   <Text style={styles.modalActionBtnTextMockup}>FALSO POS.</Text>
-                                </TouchableOpacity>
-                             </View>
-  
-                             <TouchableOpacity 
-                                style={styles.modalActionBtnFullMockup} 
-                                onPress={() => handleQuickAction(selectedAlert, 'IGNORE')}
-                             >
-                                <Ionicons name="close-circle" size={18} color="#fff" style={{ marginRight: 6 }} />
-                                <Text style={styles.modalActionBtnTextFullMockup}>IGNORAR EVENTO</Text>
-                             </TouchableOpacity>
-                          </View>
-                       )}
+                const scheduleVal = vinfoObj?.schedule || "00:00:00 - 23:59:00";
+                const intervalVal = vinfoObj?.interval || "daily";
+
+                return (
+                  <View style={styles.infoSectionMockup}>
+                    <Text style={styles.infoSectionTitle}>INFORMACIÓN DE ALERTA</Text>
+
+                    {/* Nombre de la Alarma (Full width) */}
+                    <View style={styles.infoFullCard}>
+                      <Text style={styles.infoItemLabel}>NOMBRE DE LA ALARMA</Text>
+                      <Text style={styles.infoItemVal}>{alarmName}</Text>
                     </View>
-                  );
-               })()}
+
+                    {/* Calendario & Intervalo (2 Columnas) */}
+                    <View style={styles.gridRow2x2}>
+                      <View style={styles.gridItemCard}>
+                        <Text style={styles.gridItemLabel}>CALENDARIO</Text>
+                        <Text style={styles.gridItemVal}>{scheduleVal}</Text>
+                      </View>
+                      <View style={styles.gridItemCard}>
+                        <Text style={styles.gridItemLabel}>INTERVALO</Text>
+                        <Text style={styles.gridItemVal}>{intervalVal}</Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })()}
+
+              {/* Acciones de Resolución o Registro de Minutas */}
+              {selectedAlert && (() => {
+                const isResolved = selectedAlert.is_confirmed === true || selectedAlert.is_confirmed === false || selectedAlert.state === 'resolved' || selectedAlert.state === 'ignored';
+                const resolvedLabel = selectedAlert.is_confirmed === true ? 'ALERTA CONFIRMADA' : selectedAlert.is_confirmed === false ? 'FALSO POSITIVO' : 'ALERTA IGNORADA';
+                const resolvedColor = selectedAlert.is_confirmed === true ? '#4CAF50' : selectedAlert.is_confirmed === false ? '#FF9800' : '#ffffff60';
+
+                return (
+                  <View style={styles.resolutionSectionMockup}>
+                    <Text style={styles.resolutionSectionTitle}>RESOLUCIÓN DE SEGURIDAD</Text>
+
+                    {isResolved ? (
+                      <View style={styles.resolvedContainerMockup}>
+                        {/* Status Badge */}
+                        <View style={[styles.resolvedHeaderBadge, { backgroundColor: resolvedColor + '18', borderColor: resolvedColor + '40' }]}>
+                          <Ionicons name="shield-checkmark" size={16} color={resolvedColor} style={{ marginRight: 6 }} />
+                          <Text style={[styles.resolvedHeaderBadgeText, { color: resolvedColor }]}>{resolvedLabel}</Text>
+                        </View>
+
+                        {/* Input Box para Nota/Minuta */}
+                        <View style={styles.minutaInputSection}>
+                          <Text style={styles.minutaLabel}>REGISTRO DE MINUTA / BITÁCORA</Text>
+                          <View style={styles.minutaInputRow}>
+                            <TextInput
+                              placeholder="Escribe una descripción del incidente..."
+                              placeholderTextColor="#ffffff30"
+                              multiline
+                              style={styles.minutaInput}
+                              value={noteText}
+                              onChangeText={setNoteText}
+                            />
+                            <TouchableOpacity
+                              style={[styles.minutaSendBtn, !noteText.trim() && { opacity: 0.5 }]}
+                              onPress={handleSendNote}
+                              disabled={sendingNote || !noteText.trim()}
+                            >
+                              {sendingNote ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                              ) : (
+                                <Ionicons name="send" size={16} color="#fff" />
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* Notas Enviadas dinámicamente en esta sesión */}
+                        {selectedAlert.sentDescriptions && selectedAlert.sentDescriptions.length > 0 ? (
+                          <View style={styles.sentNotesList}>
+                            {selectedAlert.sentDescriptions.map((note) => (
+                              <View key={note.id} style={styles.sentNoteCard}>
+                                <View style={styles.sentNoteHeader}>
+                                  <View style={styles.sentNoteUserBadge}>
+                                    <Text style={styles.sentNoteUserText}>{note.username}</Text>
+                                  </View>
+                                  <Text style={styles.sentNoteTimeText}>{note.timestamp}</Text>
+                                </View>
+                                <Text style={styles.sentNoteBodyText}>{note.description}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : (
+                      <View style={styles.modalActionSectionMockup}>
+                        <View style={styles.modalActionsRowMockup}>
+                          <TouchableOpacity
+                            style={[styles.modalActionBtnMockup, { backgroundColor: '#4CAF50' }]}
+                            onPress={() => handleQuickAction(selectedAlert, 'CONFIRM')}
+                          >
+                            <Ionicons name="checkmark-circle" size={16} color="#fff" style={{ marginRight: 4 }} />
+                            <Text style={styles.modalActionBtnTextMockup}>CONFIRMAR</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.modalActionBtnMockup, { backgroundColor: '#FF9800' }]}
+                            onPress={() => handleQuickAction(selectedAlert, 'FALSE_POSITIVE')}
+                          >
+                            <Ionicons name="alert-circle" size={16} color="#fff" style={{ marginRight: 4 }} />
+                            <Text style={styles.modalActionBtnTextMockup}>FALSO POS.</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        <TouchableOpacity
+                          style={styles.modalActionBtnFullMockup}
+                          onPress={() => handleQuickAction(selectedAlert, 'IGNORE')}
+                        >
+                          <Ionicons name="close-circle" size={18} color="#fff" style={{ marginRight: 6 }} />
+                          <Text style={styles.modalActionBtnTextFullMockup}>IGNORAR EVENTO</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                );
+              })()}
             </ScrollView>
           </View>
         </View>
@@ -999,8 +925,8 @@ export default function AlertsScreen() {
         animationType="fade"
         onRequestClose={() => setIsZoomVisible(false)}
       >
-        <TouchableOpacity 
-          style={styles.zoomContainer} 
+        <TouchableOpacity
+          style={styles.zoomContainer}
           activeOpacity={1}
           onPress={() => setIsZoomVisible(false)}
         >
@@ -1008,16 +934,16 @@ export default function AlertsScreen() {
             <Text style={styles.zoomHeaderTitle} numberOfLines={1}>
               {selectedAlert ? (selectedAlert.device?.name || 'Cámara').toUpperCase() : 'VISOR'}
             </Text>
-            <TouchableOpacity 
-              onPress={() => setIsZoomVisible(false)} 
+            <TouchableOpacity
+              onPress={() => setIsZoomVisible(false)}
               style={styles.zoomCloseBtn}
             >
               <Ionicons name="close" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          
-          <Image 
-            source={{ uri: selectedAlert ? getEvidenceUrl(selectedAlert) || undefined : undefined }} 
+
+          <Image
+            source={{ uri: selectedAlert ? getEvidenceUrl(selectedAlert) || undefined : undefined }}
             style={styles.zoomImage}
             resizeMode="contain"
           />
@@ -1030,105 +956,105 @@ export default function AlertsScreen() {
 
       {/* POP-UP FLOTANTE DE ALERTAS EN TIEMPO REAL */}
       {realTimePopupAlert && (
-         <Animated.View
-            style={[
-               styles.popupContainer,
-               {
-                  transform: [{ translateY: popupAnim }]
-               }
-            ]}
-         >
-            <TouchableOpacity 
-               activeOpacity={0.95} 
-               onPress={() => {
-                  setSelectedAlert(realTimePopupAlert);
-                  dismissRealTimePopup();
-               }}
-               style={styles.popupCard}
-            >
-               {(() => {
-                  const typeTag = realTimePopupAlert.motive_categorie || realTimePopupAlert.tag || 'Detección';
-                  const theme = getAnalyticTheme(typeTag);
-                  const probNum = Number(realTimePopupAlert.probability) || 0;
-                  const prob = probNum > 1 ? probNum : probNum * 100;
-                  
-                  return (
-                     <>
-                        <View style={[styles.popupAccentLine, { backgroundColor: theme.color }]} />
-                        <View style={styles.popupContent}>
-                           {/* Header */}
-                           <View style={styles.popupHeader}>
-                              <View style={styles.popupLiveBadge}>
-                                 <View style={styles.popupLiveDot} />
-                                 <Text style={styles.popupLiveText}>NUEVA ALERTA EN TIEMPO REAL</Text>
-                              </View>
-                              <TouchableOpacity style={styles.popupCloseBtn} onPress={dismissRealTimePopup}>
-                                 <Ionicons name="close" size={16} color="#ffffff80" />
-                              </TouchableOpacity>
-                           </View>
+        <Animated.View
+          style={[
+            styles.popupContainer,
+            {
+              transform: [{ translateY: popupAnim }]
+            }
+          ]}
+        >
+          <TouchableOpacity
+            activeOpacity={0.95}
+            onPress={() => {
+              setSelectedAlert(realTimePopupAlert);
+              dismissRealTimePopup();
+            }}
+            style={styles.popupCard}
+          >
+            {(() => {
+              const typeTag = realTimePopupAlert.motive_categorie || realTimePopupAlert.tag || 'Detección';
+              const theme = getAnalyticTheme(typeTag);
+              const probNum = Number(realTimePopupAlert.probability) || 0;
+              const prob = probNum > 1 ? probNum : probNum * 100;
 
-                           {/* Body */}
-                           <View style={styles.popupBody}>
-                              <Image 
-                                 source={{ uri: getEvidenceUrl(realTimePopupAlert) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }} 
-                                 style={styles.popupEvidenceImage}
-                                 resizeMode="cover"
-                              />
-                              <View style={styles.popupDetails}>
-                                 <View style={styles.popupDeviceRow}>
-                                    <Ionicons name="videocam" size={12} color="#2E9BFF" style={{ marginRight: 4 }} />
-                                    <Text style={styles.popupDeviceName} numberOfLines={1}>
-                                       {realTimePopupAlert.device?.name || 'CÁMARA'}
-                                    </Text>
-                                 </View>
-                                 <Text style={styles.popupAlarmName} numberOfLines={1}>
-                                    {realTimePopupAlert.motive_categorie || 'Alerta de Seguridad'}
-                                 </Text>
-                                 <View style={styles.popupMetricsRow}>
-                                    <Text style={styles.popupMetricLabel}>Probabilidad: </Text>
-                                    <Text style={[styles.popupMetricValue, { color: theme.color }]}>
-                                       {prob.toFixed(2)}%
-                                    </Text>
-                                 </View>
-                                 <View style={styles.popupTimeRow}>
-                                    <Ionicons name="calendar-outline" size={10} color="#ffffff60" style={{ marginRight: 4 }} />
-                                    <Text style={styles.popupTimeText}>
-                                       {formatFechaPrecisa(realTimePopupAlert.createdAt)}
-                                    </Text>
-                                 </View>
-                              </View>
-                           </View>
+              return (
+                <>
+                  <View style={[styles.popupAccentLine, { backgroundColor: theme.color }]} />
+                  <View style={styles.popupContent}>
+                    {/* Header */}
+                    <View style={styles.popupHeader}>
+                      <View style={styles.popupLiveBadge}>
+                        <View style={styles.popupLiveDot} />
+                        <Text style={styles.popupLiveText}>NUEVA ALERTA EN TIEMPO REAL</Text>
+                      </View>
+                      <TouchableOpacity style={styles.popupCloseBtn} onPress={dismissRealTimePopup}>
+                        <Ionicons name="close" size={16} color="#ffffff80" />
+                      </TouchableOpacity>
+                    </View>
 
-                           {/* Quick Action Buttons */}
-                           <View style={styles.popupActionsRow}>
-                              <TouchableOpacity 
-                                 style={[styles.popupActionBtn, { backgroundColor: '#4CAF50' }]} 
-                                 onPress={() => {
-                                    handleQuickAction(realTimePopupAlert, 'CONFIRM');
-                                    dismissRealTimePopup();
-                                 }}
-                              >
-                                 <Ionicons name="checkmark-circle" size={12} color="#fff" style={{ marginRight: 3 }} />
-                                 <Text style={styles.popupActionBtnText}>CONFIRMAR</Text>
-                              </TouchableOpacity>
-
-                              <TouchableOpacity 
-                                 style={[styles.popupActionBtn, { backgroundColor: '#FF9800' }]} 
-                                 onPress={() => {
-                                    handleQuickAction(realTimePopupAlert, 'FALSE_POSITIVE');
-                                    dismissRealTimePopup();
-                                 }}
-                              >
-                                 <Ionicons name="alert-circle" size={12} color="#fff" style={{ marginRight: 3 }} />
-                                 <Text style={styles.popupActionBtnText}>FALSO POS.</Text>
-                              </TouchableOpacity>
-                           </View>
+                    {/* Body */}
+                    <View style={styles.popupBody}>
+                      <Image
+                        source={{ uri: getEvidenceUrl(realTimePopupAlert) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
+                        style={styles.popupEvidenceImage}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.popupDetails}>
+                        <View style={styles.popupDeviceRow}>
+                          <Ionicons name="videocam" size={12} color="#2E9BFF" style={{ marginRight: 4 }} />
+                          <Text style={styles.popupDeviceName} numberOfLines={1}>
+                            {realTimePopupAlert.device?.name || 'CÁMARA'}
+                          </Text>
                         </View>
-                     </>
-                  );
-               })()}
-            </TouchableOpacity>
-         </Animated.View>
+                        <Text style={styles.popupAlarmName} numberOfLines={1}>
+                          {realTimePopupAlert.name_categorie || realTimePopupAlert.motive_categorie || 'Alerta de Seguridad'}
+                        </Text>
+                        <View style={styles.popupMetricsRow}>
+                          <Text style={styles.popupMetricLabel}>Probabilidad: </Text>
+                          <Text style={[styles.popupMetricValue, { color: theme.color }]}>
+                            {prob.toFixed(2)}%
+                          </Text>
+                        </View>
+                        <View style={styles.popupTimeRow}>
+                          <Ionicons name="calendar-outline" size={10} color="#ffffff60" style={{ marginRight: 4 }} />
+                          <Text style={styles.popupTimeText}>
+                            {formatFechaPrecisa(realTimePopupAlert.createdAt)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Quick Action Buttons */}
+                    <View style={styles.popupActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.popupActionBtn, { backgroundColor: '#4CAF50' }]}
+                        onPress={() => {
+                          handleQuickAction(realTimePopupAlert, 'CONFIRM');
+                          dismissRealTimePopup();
+                        }}
+                      >
+                        <Ionicons name="checkmark-circle" size={12} color="#fff" style={{ marginRight: 3 }} />
+                        <Text style={styles.popupActionBtnText}>CONFIRMAR</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.popupActionBtn, { backgroundColor: '#FF9800' }]}
+                        onPress={() => {
+                          handleQuickAction(realTimePopupAlert, 'FALSE_POSITIVE');
+                          dismissRealTimePopup();
+                        }}
+                      >
+                        <Ionicons name="alert-circle" size={12} color="#fff" style={{ marginRight: 3 }} />
+                        <Text style={styles.popupActionBtnText}>FALSO POS.</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </>
+              );
+            })()}
+          </TouchableOpacity>
+        </Animated.View>
       )}
     </View>
   );
@@ -1144,708 +1070,708 @@ const getStyles = (isDark: boolean) => {
 
 
   return StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: bgMain,
-    paddingTop: 60,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  logoText: {
-    color: '#2E9BFF',
-    fontSize: 20,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  toggleViewBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#161622',
-    borderWidth: 1,
-    borderColor: '#ffffff15',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  titleContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 15,
-  },
-  tituloGestion: {
-    color: '#ffffff',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  capsuleBadge: {
-    flexDirection: 'row',
-    alignSelf: 'flex-start',
-    alignItems: 'center',
-    backgroundColor: 'rgba(46, 155, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(46, 155, 255, 0.25)',
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    marginTop: 10,
-  },
-  capsuleDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#2E9BFF',
-    marginRight: 6,
-  },
-  capsuleText: {
-    color: '#2E9BFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#161622',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ffffff10',
-    paddingHorizontal: 15,
-    height: 48,
-    marginHorizontal: 20,
-    marginBottom: 20,
-  },
-  searchInput: {
-    flex: 1,
-    color: '#ffffff',
-    fontSize: 14,
-    marginLeft: 10,
-    paddingVertical: 8,
-  },
-  titulo: { color: textPrimary, fontSize: 24, fontWeight: '700' },
-  subtitulo: { color: '#2196f3', fontSize: 13, fontWeight: '500', marginTop: 2 },
-  liveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f4433620', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#f44336' },
-  liveText: { color: '#f44336', fontSize: 11, fontWeight: '700' },
-  
-  lista: { 
-    paddingHorizontal: 10, 
-    paddingBottom: 30 
-  },
-  centrado: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80, gap: 15 },
-  vacio: { color: textSecondary, fontSize: 14 },
-  
-  // GRID CARD STYLES
-  gridCard: {
-    flex: 1,
-    margin: 6,
-    backgroundColor: bgCard,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#ffffff10',
-    overflow: 'hidden',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  gridCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ffffff05',
-  },
-  gridCardCamName: {
-    color: textSecondary,
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  gridCardImage: {
-    width: '100%',
-    height: 110,
-    backgroundColor: '#050505',
-  },
-  gridCardFooter: {
-    padding: 10,
-    backgroundColor: bgCard,
-  },
-  gridCardTitle: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  gridCardLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 2,
-  },
-  gridCardLabel: {
-    color: textMuted,
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  gridCardValueRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  gridCardProbValue: {
-    color: '#2E9BFF',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  gridCardTimeValue: {
-    color: textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  
-  card: {
-    backgroundColor: bgCard,
-    borderRadius: 14,
-    marginBottom: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-  },
-  cardImage: {
-    width: '100%',
-    height: 180,
-    backgroundColor: '#050505',
-    justifyContent: 'flex-start',
-  },
-  cardOverlayTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 10,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  
-  cardFooter: {
-    backgroundColor: bgCard,
-    padding: 15,
-  },
-  footerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  footerInfo: { flex: 1 },
-  footerMetrics: { alignItems: 'flex-end' },
-  
-  cardTipo: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
-  cardCam: { color: textSecondary, fontSize: 14, fontWeight: '500', marginTop: 4 },
-  cardHora: { color: textMuted, fontSize: 11, marginBottom: 2 },
-  cardProb: { color: textPrimary, fontSize: 16, fontWeight: '800' },
-  
-  // MODAL DETALLE PREMIUM (ESTILO MOCKUP SIVI)
-  modalBg: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#0d0d0d',
-    height: '90%',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
-  modalHeaderMockup: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 15,
-    backgroundColor: '#0d0d0d',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ffffff05',
-  },
-  modalHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalHeaderDateText: {
-    color: '#2E9BFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  modalHeaderCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalScroll: {
-    paddingHorizontal: 20,
-    paddingBottom: 50,
-  },
-  evidenceContainerMockup: {
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  evidenceLabelTitle: {
-    color: textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 10,
-    textTransform: 'uppercase',
-  },
-  evidenceImageWrapper: {
-    width: '100%',
-    height: 220,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
-  evidenceImageMockup: {
-    width: '100%',
-    height: '100%',
-  },
-  evidenceCamOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  evidenceCamOverlayText: {
-    color: '#ffffffaa',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
+    container: {
+      flex: 1,
+      backgroundColor: bgMain,
+      paddingTop: 60,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      marginBottom: 10,
+    },
+    logoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    logoText: {
+      color: '#2E9BFF',
+      fontSize: 20,
+      fontWeight: '900',
+      letterSpacing: 0.5,
+    },
+    toggleViewBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 10,
+      backgroundColor: '#161622',
+      borderWidth: 1,
+      borderColor: '#ffffff15',
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+    },
+    titleContainer: {
+      paddingHorizontal: 20,
+      marginBottom: 15,
+    },
+    tituloGestion: {
+      color: '#ffffff',
+      fontSize: 28,
+      fontWeight: '800',
+    },
+    capsuleBadge: {
+      flexDirection: 'row',
+      alignSelf: 'flex-start',
+      alignItems: 'center',
+      backgroundColor: 'rgba(46, 155, 255, 0.08)',
+      borderWidth: 1,
+      borderColor: 'rgba(46, 155, 255, 0.25)',
+      borderRadius: 18,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      marginTop: 10,
+    },
+    capsuleDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: '#2E9BFF',
+      marginRight: 6,
+    },
+    capsuleText: {
+      color: '#2E9BFF',
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#161622',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#ffffff10',
+      paddingHorizontal: 15,
+      height: 48,
+      marginHorizontal: 20,
+      marginBottom: 20,
+    },
+    searchInput: {
+      flex: 1,
+      color: '#ffffff',
+      fontSize: 14,
+      marginLeft: 10,
+      paddingVertical: 8,
+    },
+    titulo: { color: textPrimary, fontSize: 24, fontWeight: '700' },
+    subtitulo: { color: '#2196f3', fontSize: 13, fontWeight: '500', marginTop: 2 },
+    liveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f4433620', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
+    liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#f44336' },
+    liveText: { color: '#f44336', fontSize: 11, fontWeight: '700' },
 
-  // GRID 2x2 METADATA STYLES
-  gridContainer2x2: {
-    flexDirection: 'column',
-    gap: 12,
-    marginBottom: 25,
-  },
-  gridRow2x2: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  gridItemCard: {
-    flex: 1,
-    backgroundColor: '#161622',
-    borderWidth: 1,
-    borderColor: '#ffffff05',
-    borderRadius: 10,
-    padding: 12,
-    justifyContent: 'center',
-  },
-  gridItemLabel: {
-    color: textMuted,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-    textTransform: 'uppercase',
-  },
-  gridItemVal: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+    lista: {
+      paddingHorizontal: 10,
+      paddingBottom: 30
+    },
+    centrado: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80, gap: 15 },
+    vacio: { color: textSecondary, fontSize: 14 },
 
-  // INFORMACIÓN DE ALERTA STYLES
-  infoSectionMockup: {
-    marginBottom: 25,
-  },
-  infoSectionTitle: {
-    color: '#2E9BFF',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-    textTransform: 'uppercase',
-  },
-  infoFullCard: {
-    backgroundColor: '#161622',
-    borderWidth: 1,
-    borderColor: '#ffffff05',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
-  },
-  infoItemLabel: {
-    color: textMuted,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  infoItemVal: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-  },
+    // GRID CARD STYLES
+    gridCard: {
+      flex: 1,
+      margin: 6,
+      backgroundColor: bgCard,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: '#ffffff10',
+      overflow: 'hidden',
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    },
+    gridCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+      borderBottomWidth: 1,
+      borderBottomColor: '#ffffff05',
+    },
+    gridCardCamName: {
+      color: textSecondary,
+      fontSize: 10,
+      fontWeight: '800',
+      textTransform: 'uppercase',
+    },
+    gridCardImage: {
+      width: '100%',
+      height: 110,
+      backgroundColor: '#050505',
+    },
+    gridCardFooter: {
+      padding: 10,
+      backgroundColor: bgCard,
+    },
+    gridCardTitle: {
+      color: '#ffffff',
+      fontSize: 13,
+      fontWeight: '800',
+      marginBottom: 8,
+    },
+    gridCardLabelRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 2,
+    },
+    gridCardLabel: {
+      color: textMuted,
+      fontSize: 9,
+      fontWeight: '700',
+    },
+    gridCardValueRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    gridCardProbValue: {
+      color: '#2E9BFF',
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    gridCardTimeValue: {
+      color: textSecondary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
 
-  // RESOLUTION SECTION STYLES
-  resolutionSectionMockup: {
-    marginTop: 5,
-  },
-  resolutionSectionTitle: {
-    color: textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    textAlign: 'center',
-    letterSpacing: 1,
-    marginBottom: 15,
-    textTransform: 'uppercase',
-  },
-  modalActionSectionMockup: {
-    backgroundColor: '#0d0d0d',
-    borderRadius: 12,
-    gap: 12,
-  },
-  modalActionsRowMockup: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  modalActionBtnMockup: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 8,
-    gap: 6,
-  },
-  modalActionBtnTextMockup: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  modalActionBtnFullMockup: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 8,
-    backgroundColor: '#f44336',
-    gap: 6,
-  },
-  modalActionBtnTextFullMockup: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  resolvedContainerMockup: {
-    backgroundColor: '#161622',
-    borderWidth: 1,
-    borderColor: '#ffffff05',
-    borderRadius: 12,
-    padding: 15,
-  },
-  resolvedHeaderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginBottom: 15,
-  },
-  resolvedHeaderBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  minutaInputSection: {
-    marginBottom: 10,
-  },
-  minutaLabel: {
-    color: textMuted,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  minutaInputRow: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-  },
-  minutaInput: {
-    flex: 1,
-    backgroundColor: '#050505',
-    borderWidth: 1,
-    borderColor: borderCol,
-    borderRadius: 10,
-    color: textPrimary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
-    minHeight: 45,
-    textAlignVertical: 'top',
-  },
-  minutaSendBtn: {
-    width: 45,
-    height: 45,
-    borderRadius: 10,
-    backgroundColor: '#4CAF50',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sentNotesList: {
-    flexDirection: 'column',
-    gap: 10,
-    marginTop: 15,
-    borderTopWidth: 1,
-    borderColor: borderCol,
-    paddingTop: 15,
-  },
-  sentNoteCard: {
-    backgroundColor: '#0d0d0d',
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: borderCol,
-  },
-  sentNoteHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  sentNoteUserBadge: {
-    backgroundColor: '#2E9BFF20',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  sentNoteUserText: {
-    color: '#2E9BFF',
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  sentNoteTimeText: {
-    color: textMuted,
-    fontSize: 9,
-    fontWeight: '600',
-  },
-  sentNoteBodyText: {
-    color: textPrimary,
-    fontSize: 13,
-    lineHeight: 18,
-  },
+    card: {
+      backgroundColor: bgCard,
+      borderRadius: 14,
+      marginBottom: 16,
+      overflow: 'hidden',
+      borderWidth: 1,
+    },
+    cardImage: {
+      width: '100%',
+      height: 180,
+      backgroundColor: '#050505',
+      justifyContent: 'flex-start',
+    },
+    cardOverlayTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      padding: 10,
+    },
+    badge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+    },
+    badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
 
-  // EVIDENCIA ZOOM MODAL STYLES
-  zoomContainer: {
-    flex: 1,
-    backgroundColor: 'black',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  zoomHeader: {
-    position: 'absolute',
-    top: 50,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    zIndex: 10,
-  },
-  zoomHeaderTitle: {
-    color: '#ffffffaa',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  zoomCloseBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  zoomImage: {
-    width: '100%',
-    height: '75%',
-  },
-  zoomFooter: {
-    position: 'absolute',
-    bottom: 40,
-    alignItems: 'center',
-  },
-  zoomFooterText: {
-    color: '#ffffff60',
-    fontSize: 11,
-    fontWeight: '500',
-  },
+    cardFooter: {
+      backgroundColor: bgCard,
+      padding: 15,
+    },
+    footerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    footerInfo: { flex: 1 },
+    footerMetrics: { alignItems: 'flex-end' },
 
-  // REAL-TIME POPUP OVERLAY STYLES
-  popupContainer: {
-    position: 'absolute',
-    left: 15,
-    right: 15,
-    zIndex: 10000,
-  },
-  popupCard: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(22, 22, 34, 0.98)',
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#ffffff10',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  popupAccentLine: {
-    width: 6,
-    height: '100%',
-  },
-  popupContent: {
-    flex: 1,
-    padding: 12,
-  },
-  popupHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  popupLiveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(244, 67, 54, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  popupLiveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#F44336',
-    marginRight: 6,
-  },
-  popupLiveText: {
-    color: '#F44336',
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  popupCloseBtn: {
-    padding: 4,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12,
-  },
-  popupBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  popupEvidenceImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 8,
-    backgroundColor: '#000',
-  },
-  popupDetails: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  popupDeviceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  popupDeviceName: {
-    color: '#ffffffaa',
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  popupAlarmName: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  popupMetricsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  popupMetricLabel: {
-    color: '#ffffff60',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  popupMetricValue: {
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  popupTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  popupTimeText: {
-    color: '#ffffff50',
-    fontSize: 9,
-    fontWeight: '600',
-  },
-  popupActionsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  popupActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  popupActionBtnText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-});
+    cardTipo: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+    cardCam: { color: textSecondary, fontSize: 14, fontWeight: '500', marginTop: 4 },
+    cardHora: { color: textMuted, fontSize: 11, marginBottom: 2 },
+    cardProb: { color: textPrimary, fontSize: 16, fontWeight: '800' },
+
+    // MODAL DETALLE PREMIUM (ESTILO MOCKUP SIVI)
+    modalBg: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.85)',
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: '#0d0d0d',
+      height: '90%',
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      overflow: 'hidden',
+    },
+    modalHeaderMockup: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: 15,
+      backgroundColor: '#0d0d0d',
+      borderBottomWidth: 1,
+      borderBottomColor: '#ffffff05',
+    },
+    modalHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    modalHeaderDateText: {
+      color: '#2E9BFF',
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    modalHeaderCloseBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalScroll: {
+      paddingHorizontal: 20,
+      paddingBottom: 50,
+    },
+    evidenceContainerMockup: {
+      marginTop: 10,
+      marginBottom: 20,
+    },
+    evidenceLabelTitle: {
+      color: textMuted,
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      marginBottom: 10,
+      textTransform: 'uppercase',
+    },
+    evidenceImageWrapper: {
+      width: '100%',
+      height: 220,
+      borderRadius: 12,
+      overflow: 'hidden',
+      backgroundColor: '#000',
+      borderWidth: 1,
+      borderColor: '#ffffff08',
+    },
+    evidenceImageMockup: {
+      width: '100%',
+      height: '100%',
+    },
+    evidenceCamOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+    },
+    evidenceCamOverlayText: {
+      color: '#ffffffaa',
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+
+    // GRID 2x2 METADATA STYLES
+    gridContainer2x2: {
+      flexDirection: 'column',
+      gap: 12,
+      marginBottom: 25,
+    },
+    gridRow2x2: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    gridItemCard: {
+      flex: 1,
+      backgroundColor: '#161622',
+      borderWidth: 1,
+      borderColor: '#ffffff05',
+      borderRadius: 10,
+      padding: 12,
+      justifyContent: 'center',
+    },
+    gridItemLabel: {
+      color: textMuted,
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      marginBottom: 4,
+      textTransform: 'uppercase',
+    },
+    gridItemVal: {
+      color: '#ffffff',
+      fontSize: 12,
+      fontWeight: '700',
+    },
+
+    // INFORMACIÓN DE ALERTA STYLES
+    infoSectionMockup: {
+      marginBottom: 25,
+    },
+    infoSectionTitle: {
+      color: '#2E9BFF',
+      fontSize: 14,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      marginBottom: 12,
+      textTransform: 'uppercase',
+    },
+    infoFullCard: {
+      backgroundColor: '#161622',
+      borderWidth: 1,
+      borderColor: '#ffffff05',
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 12,
+    },
+    infoItemLabel: {
+      color: textMuted,
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      marginBottom: 4,
+    },
+    infoItemVal: {
+      color: '#ffffff',
+      fontSize: 13,
+      fontWeight: '800',
+    },
+
+    // RESOLUTION SECTION STYLES
+    resolutionSectionMockup: {
+      marginTop: 5,
+    },
+    resolutionSectionTitle: {
+      color: textMuted,
+      fontSize: 11,
+      fontWeight: '800',
+      textAlign: 'center',
+      letterSpacing: 1,
+      marginBottom: 15,
+      textTransform: 'uppercase',
+    },
+    modalActionSectionMockup: {
+      backgroundColor: '#0d0d0d',
+      borderRadius: 12,
+      gap: 12,
+    },
+    modalActionsRowMockup: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    modalActionBtnMockup: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      borderRadius: 8,
+      gap: 6,
+    },
+    modalActionBtnTextMockup: {
+      color: '#fff',
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    modalActionBtnFullMockup: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      borderRadius: 8,
+      backgroundColor: '#f44336',
+      gap: 6,
+    },
+    modalActionBtnTextFullMockup: {
+      color: '#fff',
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    resolvedContainerMockup: {
+      backgroundColor: '#161622',
+      borderWidth: 1,
+      borderColor: '#ffffff05',
+      borderRadius: 12,
+      padding: 15,
+    },
+    resolvedHeaderBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 20,
+      borderWidth: 1,
+      marginBottom: 15,
+    },
+    resolvedHeaderBadgeText: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    minutaInputSection: {
+      marginBottom: 10,
+    },
+    minutaLabel: {
+      color: textMuted,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      marginBottom: 8,
+    },
+    minutaInputRow: {
+      flexDirection: 'row',
+      gap: 10,
+      alignItems: 'center',
+    },
+    minutaInput: {
+      flex: 1,
+      backgroundColor: '#050505',
+      borderWidth: 1,
+      borderColor: borderCol,
+      borderRadius: 10,
+      color: textPrimary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 13,
+      minHeight: 45,
+      textAlignVertical: 'top',
+    },
+    minutaSendBtn: {
+      width: 45,
+      height: 45,
+      borderRadius: 10,
+      backgroundColor: '#4CAF50',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sentNotesList: {
+      flexDirection: 'column',
+      gap: 10,
+      marginTop: 15,
+      borderTopWidth: 1,
+      borderColor: borderCol,
+      paddingTop: 15,
+    },
+    sentNoteCard: {
+      backgroundColor: '#0d0d0d',
+      padding: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    sentNoteHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    sentNoteUserBadge: {
+      backgroundColor: '#2E9BFF20',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 4,
+    },
+    sentNoteUserText: {
+      color: '#2E9BFF',
+      fontSize: 10,
+      fontWeight: '800',
+      textTransform: 'uppercase',
+    },
+    sentNoteTimeText: {
+      color: textMuted,
+      fontSize: 9,
+      fontWeight: '600',
+    },
+    sentNoteBodyText: {
+      color: textPrimary,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+
+    // EVIDENCIA ZOOM MODAL STYLES
+    zoomContainer: {
+      flex: 1,
+      backgroundColor: 'black',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    zoomHeader: {
+      position: 'absolute',
+      top: 50,
+      left: 0,
+      right: 0,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      zIndex: 10,
+    },
+    zoomHeaderTitle: {
+      color: '#ffffffaa',
+      fontSize: 14,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    zoomCloseBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    zoomImage: {
+      width: '100%',
+      height: '75%',
+    },
+    zoomFooter: {
+      position: 'absolute',
+      bottom: 40,
+      alignItems: 'center',
+    },
+    zoomFooterText: {
+      color: '#ffffff60',
+      fontSize: 11,
+      fontWeight: '500',
+    },
+
+    // REAL-TIME POPUP OVERLAY STYLES
+    popupContainer: {
+      position: 'absolute',
+      left: 15,
+      right: 15,
+      zIndex: 10000,
+    },
+    popupCard: {
+      flexDirection: 'row',
+      backgroundColor: 'rgba(22, 22, 34, 0.98)',
+      borderRadius: 16,
+      borderWidth: 1.5,
+      borderColor: '#ffffff10',
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.6,
+      shadowRadius: 12,
+      elevation: 10,
+    },
+    popupAccentLine: {
+      width: 6,
+      height: '100%',
+    },
+    popupContent: {
+      flex: 1,
+      padding: 12,
+    },
+    popupHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    popupLiveBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(244, 67, 54, 0.15)',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 4,
+    },
+    popupLiveDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: '#F44336',
+      marginRight: 6,
+    },
+    popupLiveText: {
+      color: '#F44336',
+      fontSize: 9,
+      fontWeight: '900',
+      letterSpacing: 0.5,
+    },
+    popupCloseBtn: {
+      padding: 4,
+      backgroundColor: 'rgba(255,255,255,0.08)',
+      borderRadius: 12,
+    },
+    popupBody: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    popupEvidenceImage: {
+      width: 70,
+      height: 70,
+      borderRadius: 8,
+      backgroundColor: '#000',
+    },
+    popupDetails: {
+      flex: 1,
+      marginLeft: 12,
+    },
+    popupDeviceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 2,
+    },
+    popupDeviceName: {
+      color: '#ffffffaa',
+      fontSize: 10,
+      fontWeight: '800',
+      textTransform: 'uppercase',
+    },
+    popupAlarmName: {
+      color: '#ffffff',
+      fontSize: 13,
+      fontWeight: '800',
+      marginBottom: 4,
+    },
+    popupMetricsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 2,
+    },
+    popupMetricLabel: {
+      color: '#ffffff60',
+      fontSize: 10,
+      fontWeight: '600',
+    },
+    popupMetricValue: {
+      fontSize: 11,
+      fontWeight: '900',
+    },
+    popupTimeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    popupTimeText: {
+      color: '#ffffff50',
+      fontSize: 9,
+      fontWeight: '600',
+    },
+    popupActionsRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    popupActionBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    popupActionBtnText: {
+      color: '#ffffff',
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+  });
 };

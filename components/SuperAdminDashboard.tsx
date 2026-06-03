@@ -247,7 +247,7 @@ export default function SuperAdminDashboard() {
                     const impersonationPayload = configMatch || {
                       id: wsId,
                       name: wsName,
-                      domain: instance.backendUrl ? instance.backendUrl.replace(/https?:\/\//, '') : '63.141.255.156:9169',
+                      domain: instance.backendUrl ? instance.backendUrl.replace(/https?:\/\//, '') : 'orchestrator.guardian.imperium.pe',
                       https: instance.backendUrl ? instance.backendUrl.startsWith('https') : false,
                       type: type,
                       workId: '23'

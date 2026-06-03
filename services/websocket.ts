@@ -107,7 +107,22 @@ export class AlertSocketService {
   connect() {
     if (this.sockets.length > 0) return;
 
-    const { jwtToken: token, activeDomain } = useAppStore.getState();
+    const { jwtToken: globalToken, activeDomain, workspaceSessions, activeWorkspace, impersonatedWorkspace } = useAppStore.getState();
+
+    // Resolver el token del workspace activo o impersonado actual
+    const currentWs = impersonatedWorkspace || activeWorkspace;
+    const activeWsId = currentWs?.id || currentWs?.workspace || '';
+
+    let token = globalToken;
+    if (activeWsId && workspaceSessions) {
+      const activeSession = workspaceSessions.find(
+        (s: any) => s.workspace?.toLowerCase() === activeWsId.toLowerCase()
+      );
+      if (activeSession) {
+        token = activeSession.token || activeSession.jwt || token;
+      }
+    }
+
     if (!token) {
       console.warn('[WS] Sin token — abortando conexión');
       return;

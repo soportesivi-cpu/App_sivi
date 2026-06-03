@@ -16,13 +16,13 @@ import { autoLogin } from '../../services/api';
 import { useAppStore } from '../../services/store';
 
 export default function LoginScreen() {
-  const [email, setEmail]       = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [status, setStatus]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
   const setSession = useAppStore((state) => state.setSession);
 
-async function handleLogin() {
+  async function handleLogin() {
     if (!email || !password) {
       Alert.alert('Error', 'Ingresa email y contraseña');
       return;
@@ -32,10 +32,12 @@ async function handleLogin() {
     setStatus('Conectando...');
 
     try {
-      const resultado = await autoLogin(email.trim(), password);
+      const resultado = await autoLogin(email.trim(), password.trim());
 
       if (!resultado) {
         Alert.alert('Error', 'Credenciales incorrectas o sin acceso');
+        setLoading(false);
+        setStatus('');
         return;
       }
 
@@ -44,14 +46,12 @@ async function handleLogin() {
       // Invocar setSession con la firma actualizada pasando: domain, token, jwt, user, workspace, sessions
       await setSession(workspace.domain, data.token, data.jwt, data.user, workspace, data.sessions);
 
-      setStatus(`Conectado a ${workspace.name}`);
-
       // Todos van al dashboard. El enrutador interno del dashboard se encarga de mostrar la vista correcta según el rol y la personificación.
       router.replace('/(tabs)/dashboard');
 
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo conectar. Verifica tu conexión.');
-    } finally {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'No se pudo conectar. Verifica tu conexión.';
+      Alert.alert('Error', msg);
       setLoading(false);
       setStatus('');
     }
@@ -64,10 +64,10 @@ async function handleLogin() {
     >
       {/* LOGO */}
       <View style={styles.logoContainer}>
-        <Image 
-          source={require('../../bg-grande.png')} 
-          style={styles.logoImage} 
-          resizeMode="contain" 
+        <Image
+          source={require('../../bg-grande.png')}
+          style={styles.logoImage}
+          resizeMode="contain"
         />
       </View>
 

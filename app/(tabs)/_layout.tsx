@@ -6,7 +6,7 @@ import { useAppStore } from '../../services/store';
 const SIVI_THEME = {
   background: '#0A0A0B',
   surface: '#121214',
-  primary: '#2E9BFF', 
+  primary: '#2E9BFF',
   text: '#ffffff',
   textMuted: '#ffffff', // De plomo a blanco para máxima claridad
   border: '#ffffff10'
@@ -16,8 +16,7 @@ export default function TabsLayout() {
   const { userData, impersonatedWorkspace, activeWorkspace } = useAppStore();
   const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
   const restrictAccess = isSuperAdmin && !impersonatedWorkspace;
-  const currentWs = impersonatedWorkspace || activeWorkspace;
-  const hideCameras = restrictAccess || (currentWs?.type === 'local' && !isSuperAdmin);
+  const hideCameras = restrictAccess;
 
   return (
     <Tabs

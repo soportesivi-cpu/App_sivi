@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
 import { getDevices, getWorkspacesDevices, getAlerts, getObjects, getMediaUrl } from '../../services/api';
-import { PROD_MEDIA_DOMAIN } from '../../constants/config';
+import { PROD_MEDIA_DOMAIN, WORKSPACES } from '../../constants/config';
 import Loading from '../../components/Loading';
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
@@ -53,9 +53,14 @@ export default function CamerasScreen() {
   const isLocal = currentWs?.type === 'local';
 
   const getWebViewBaseUrl = () => {
-    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('local.imperium.pe');
-    if (isIpOrLocal && domain) {
-      const parts = domain.split(':');
+    let effectiveDomain = domain;
+    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
+      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
+      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    }
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
+    if (isIpOrLocal && effectiveDomain) {
+      const parts = effectiveDomain.split(':');
       const host = parts[0];
       const apiPort = parts[1];
       if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
@@ -70,19 +75,12 @@ export default function CamerasScreen() {
   const [streamMode, setStreamMode] = useState<'hls' | 'webrtc'>('webrtc'); // Favorecemos webrtc como default
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>(isLocal ? 'list' : 'grid');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [streamStatus, setStreamStatus] = useState<Record<number, CameraStreamStatus>>({});
   const [cameraThumbnails, setCameraThumbnails] = useState<Record<number, string>>({});
   const [_thumbnailFailures, setThumbnailFailures] = useState<Record<number, boolean>>({});
   const [thumbnailCameraId, setThumbnailCameraId] = useState<number | null>(null);
   const webViewRef = useRef<WebView>(null);
-
-  // Forzar modo lista en local
-  useEffect(() => {
-    if (isLocal) {
-      setViewMode('list');
-    }
-  }, [isLocal]);
 
   // Al abrir el modal de una cámara, seleccionamos por defecto WebRTC (WHEP)
   useEffect(() => {
@@ -105,10 +103,12 @@ export default function CamerasScreen() {
     return activeSession[0]?.token || token || '';
   }, [activeSession, isLocal, token]);
 
+  const isRealclub = (currentWs?.id || '').toLowerCase() === 'realclub';
+
   const { data: qData, isLoading: loading } = useQuery({
-    queryKey: ['cameras', domain, activeSession],
+    queryKey: ['cameras', domain, activeSession, isRealclub],
     queryFn: async () => {
-      if (isLocal) {
+      if (isLocal || isRealclub) {
         return getDevices();
       }
       if (activeSession.length === 0) {
@@ -119,12 +119,12 @@ export default function CamerasScreen() {
   });
 
   const rawCameras = useMemo((): Camera[] => {
-    if (isLocal) {
+    if (isLocal || isRealclub) {
       return qData?.rows || [];
     }
     const wsData = qData?.workspaces?.[0];
     return wsData?.devices || [];
-  }, [qData, isLocal]);
+  }, [qData, isLocal, isRealclub]);
 
   const filteredCameras = useMemo(() => {
     return rawCameras.filter(cam => {
@@ -242,9 +242,15 @@ export default function CamerasScreen() {
     const suffix = cacheBust ? `?_cb=${cacheBust}` : '';
     const streamName = getStreamName(camera);
 
-    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('local.imperium.pe');
-    if (isIpOrLocal && domain) {
-      const parts = domain.split(':');
+    let effectiveDomain = domain;
+    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
+      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
+      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    }
+
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
+    if (isIpOrLocal && effectiveDomain) {
+      const parts = effectiveDomain.split(':');
       const host = parts[0];
       const apiPort = parts[1];
 
@@ -271,9 +277,15 @@ export default function CamerasScreen() {
   function getWebRtcUrl(camera: Camera): string {
     const streamName = getStreamName(camera);
 
-    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('local.imperium.pe');
-    if (isIpOrLocal && domain) {
-      const parts = domain.split(':');
+    let effectiveDomain = domain;
+    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
+      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
+      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    }
+
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
+    if (isIpOrLocal && effectiveDomain) {
+      const parts = effectiveDomain.split(':');
       const host = parts[0];
       const apiPort = parts[1];
 
@@ -569,14 +581,12 @@ export default function CamerasScreen() {
           <Text style={{ color: '#2E9BFF', fontSize: 20, fontWeight: '900', letterSpacing: -1, marginLeft: 10 }}>SIVI</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {!isLocal && (
-            <TouchableOpacity
-              style={styles.filterBtn}
-              onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-            >
-              <Ionicons name={viewMode === 'grid' ? "list" : "grid"} size={16} color="#ffffff" />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.filterBtn}
+            onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+          >
+            <Ionicons name={viewMode === 'grid' ? "list" : "grid"} size={16} color="#ffffff" />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -817,9 +827,9 @@ export default function CamerasScreen() {
           {/* URL DE DEBUG PARA EL USUARIO */}
           {selected && (
             <View style={{ paddingHorizontal: 20, paddingBottom: 10 }}>
-               <Text style={{ color: '#ffeb3b', fontSize: 10, textAlign: 'center' }}>
-                  DEBUG URL: {streamMode === 'hls' ? getHlsUrl(selected).split('?')[0] : getWebRtcUrl(selected)}
-               </Text>
+              <Text style={{ color: '#ffeb3b', fontSize: 10, textAlign: 'center' }}>
+                DEBUG URL: {streamMode === 'hls' ? getHlsUrl(selected).split('?')[0] : getWebRtcUrl(selected)}
+              </Text>
             </View>
           )}
 

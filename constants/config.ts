@@ -19,12 +19,13 @@ export const WORKSPACES: WorkspaceEntry[] = [
   { id: 'cmarket', name: 'Imperium Cmarket', domain: 'cmarket.guardian.imperium.pe', https: true, type: 'cloud', cameras: 22, users: 5, status: 'Active', workId: '24' },
   { id: 'alarms', name: 'Imperium Alarms', domain: 'alarms.guardian.imperium.pe', https: true, type: 'cloud', cameras: 15, users: 3, status: 'Active', workId: '25' },
   { id: 'local-frp', name: 'Imperium Local FRP', domain: '63.141.255.156:19090', https: false, type: 'local', cameras: 8, users: 2, status: 'Active', workId: '23' },
+  { id: 'realclub', name: 'Imperium Real Club', domain: 'realclub.guardian.imperium.pe', https: true, type: 'cloud', cameras: 12, users: 3, status: 'Active', workId: '21' },
 ];
 
 // ─── Servidores de producción (siempre fijos) ────────────────────────────────
 
 /** Dominio principal de la API + Socket.IO de Imperium */
-export const PROD_API_DOMAIN   = '63.141.255.156:9169';
+export const PROD_API_DOMAIN = 'orchestrator.guardian.imperium.pe';
 
 /** Dominio de MediaMTX: HLS (:8888) y WebRTC WHEP (:8889) */
 export const PROD_MEDIA_DOMAIN = 'control.sivi.imperium.pe';
@@ -32,12 +33,15 @@ export const PROD_MEDIA_DOMAIN = 'control.sivi.imperium.pe';
 // ─── Builder de URLs por entorno ─────────────────────────────────────────────
 
 export function buildUrls(domain: string) {
+  const isLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('.local') || domain?.includes(':');
+  const proto = isLocal ? 'http' : 'https';
+  const wsProto = isLocal ? 'ws' : 'wss';
   return {
-    API_URL:  `http://${domain}/api/v1`,
-    HLS_URL:  `http://${domain}/hls`,
-    WS_URL:   `ws://${domain}`,
-    BASE_URL: `http://${domain}`,
+    API_URL: `${proto}://${domain}/api/v1`,
+    HLS_URL: `${proto}://${domain}/hls`,
+    WS_URL: `${wsProto}://${domain}`,
+    BASE_URL: `${proto}://${domain}`,
   };
 }
 
-export const ADMIN_EMAIL = 'info@ebenezertechs.com';
+export const ADMIN_EMAIL = 'info@ebenezertechs.com';
