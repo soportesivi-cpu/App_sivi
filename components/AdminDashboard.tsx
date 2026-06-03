@@ -421,39 +421,48 @@ export default function AdminDashboard() {
 
           {/* ÚLTIMAS ALERTAS LIST (Limitado a 5 alertas más recientes) */}
           <View style={[styles.rowCenter, { justifyContent: 'space-between', marginTop: 28, marginBottom: 12 }]}>
-            <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, fontSize: 13 }]}>ÚLTIMAS ALERTAS</Text>
+            <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, fontSize: 13 }]}>ÚLTIMAS ALERTAS (24H)</Text>
             <TouchableOpacity onPress={() => router.push('/(tabs)/alerts')}>
               <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '600' }}>Ver todas</Text>
             </TouchableOpacity>
           </View>
           
-          {(dashboardData.recentAlerts || []).slice(0, 5).map((alert: any) => (
-            <TouchableOpacity key={alert.id} style={styles.alertRow} onPress={() => router.push(`/(tabs)/alerts?alertId=${alert.id}`)}>
-              <View style={styles.alertThumbContainer}>
-                {alert.img ? (
-                  <Image source={{ uri: alert.img }} style={styles.alertThumb} />
-                ) : (
-                  <View style={[styles.alertThumb, { justifyContent: 'center', alignItems: 'center' }]}>
-                    <Ionicons name="videocam-off" size={24} color={theme.onSurfaceVariant} />
-                  </View>
-                )}
-                <View style={[styles.alertThumbBorder, { borderColor: `${theme.primary}40` }]} />
-              </View>
-              <View style={styles.alertInfo}>
-                <View style={styles.rowCenter}>
-                  <Ionicons name={alert.icon as any} size={14} color={alert.type === 'error' ? theme.tertiary : theme.primary} style={{ marginRight: 6 }} />
-                  <Text style={styles.alertTitle} numberOfLines={1}>{alert.title}</Text>
+          {dashboardData.recentAlerts && dashboardData.recentAlerts.length === 0 ? (
+            <View style={[styles.card, { padding: 20, alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed' }]}>
+              <Ionicons name="information-circle-outline" size={24} color={theme.onSurfaceVariant} style={{ opacity: 0.5, marginBottom: 6 }} />
+              <Text style={{ color: theme.onSurfaceVariant, fontSize: 13, opacity: 0.6, fontWeight: '500' }}>
+                Sin alertas en las últimas 24h
+              </Text>
+            </View>
+          ) : (
+            (dashboardData.recentAlerts || []).slice(0, 5).map((alert: any) => (
+              <TouchableOpacity key={alert.id} style={styles.alertRow} onPress={() => router.push(`/(tabs)/alerts?alertId=${alert.id}&createdAt=${alert.rawItem?.createdAt || alert.createdAt || ''}`)}>
+                <View style={styles.alertThumbContainer}>
+                  {alert.img ? (
+                    <Image source={{ uri: alert.img }} style={styles.alertThumb} />
+                  ) : (
+                    <View style={[styles.alertThumb, { justifyContent: 'center', alignItems: 'center' }]}>
+                      <Ionicons name="videocam-off" size={24} color={theme.onSurfaceVariant} />
+                    </View>
+                  )}
+                  <View style={[styles.alertThumbBorder, { borderColor: `${theme.primary}40` }]} />
                 </View>
-                <Text style={styles.alertMeta}>{alert.time} • {alert.camera}</Text>
-              </View>
-              <View style={[styles.alertBadge, { 
-                  backgroundColor: alert.type === 'error' ? `${theme.tertiary}15` : `${theme.primary}15`,
-                  borderColor: alert.type === 'error' ? `${theme.tertiary}40` : `${theme.primary}40`
-                }]}>
-                <Text style={[styles.textMono, { color: alert.type === 'error' ? theme.tertiary : theme.primary, fontSize: 11 }]}>{alert.percent}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+                <View style={styles.alertInfo}>
+                  <View style={styles.rowCenter}>
+                    <Ionicons name={alert.icon as any} size={14} color={alert.type === 'error' ? theme.tertiary : theme.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.alertTitle} numberOfLines={1}>{alert.title}</Text>
+                  </View>
+                  <Text style={styles.alertMeta}>{alert.time} • {alert.camera}</Text>
+                </View>
+                <View style={[styles.alertBadge, { 
+                    backgroundColor: alert.type === 'error' ? `${theme.tertiary}15` : `${theme.primary}15`,
+                    borderColor: alert.type === 'error' ? `${theme.tertiary}40` : `${theme.primary}40`
+                  }]}>
+                  <Text style={[styles.textMono, { color: alert.type === 'error' ? theme.tertiary : theme.primary, fontSize: 11 }]}>{alert.percent}</Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
         </ScrollView>
       ) : null}
 

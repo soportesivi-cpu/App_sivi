@@ -14,9 +14,10 @@ import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
-import { getDevices, getWorkspacesDevices, getAlerts, getObjects, getMediaUrl } from '../../services/api';
+import { getDevices, getWorkspacesDevices, getAlerts, getObjects, getMediaUrl, getWorkspacesEvents } from '../../services/api';
 import { PROD_MEDIA_DOMAIN, WORKSPACES } from '../../constants/config';
 import Loading from '../../components/Loading';
+import { router } from 'expo-router';
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 
@@ -193,7 +194,33 @@ export default function CamerasScreen() {
 
   const { data: objectsData } = useQuery({
     queryKey: ['camera_objects_live', selected?.id],
-    queryFn: () => getObjects(1),
+    queryFn: async () => {
+      if (!selected) return { rows: [] };
+      const toDate = new Date();
+      const fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
+      const formatLimaISO = (d: Date) => {
+        const options = {
+          timeZone: 'America/Lima',
+          year: 'numeric' as const, month: '2-digit' as const, day: '2-digit' as const,
+          hour: '2-digit' as const, minute: '2-digit' as const, second: '2-digit' as const,
+          hour12: false
+        };
+        const formatter = new Intl.DateTimeFormat('en-US', options);
+        const parts = formatter.formatToParts(d);
+        const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
+        return `${getVal('year')}-${getVal('month')}-${getVal('day')}T${getVal('hour')}:${getVal('minute')}:${getVal('second')}-05:00`;
+      };
+      return getWorkspacesEvents({
+        sessions: activeSession,
+        eventType: 'smart_event',
+        from: formatLimaISO(fromDate),
+        to: formatLimaISO(toDate),
+        timezone: 'America/Lima',
+        page: 1,
+        limit: 5,
+        filters: { deviceId: selected.deviceId || selected.id }
+      });
+    },
     enabled: !!selected,
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
@@ -201,21 +228,45 @@ export default function CamerasScreen() {
 
   const { data: actionsData } = useQuery({
     queryKey: ['camera_actions_live', selected?.id],
-    queryFn: () => getAlerts(1),
+    queryFn: async () => {
+      if (!selected) return { rows: [] };
+      const toDate = new Date();
+      const fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
+      const formatLimaISO = (d: Date) => {
+        const options = {
+          timeZone: 'America/Lima',
+          year: 'numeric' as const, month: '2-digit' as const, day: '2-digit' as const,
+          hour: '2-digit' as const, minute: '2-digit' as const, second: '2-digit' as const,
+          hour12: false
+        };
+        const formatter = new Intl.DateTimeFormat('en-US', options);
+        const parts = formatter.formatToParts(d);
+        const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
+        return `${getVal('year')}-${getVal('month')}-${getVal('day')}T${getVal('hour')}:${getVal('minute')}:${getVal('second')}-05:00`;
+      };
+      return getWorkspacesEvents({
+        sessions: activeSession,
+        eventType: 'alert',
+        from: formatLimaISO(fromDate),
+        to: formatLimaISO(toDate),
+        timezone: 'America/Lima',
+        page: 1,
+        limit: 5,
+        filters: { deviceId: selected.deviceId || selected.id }
+      });
+    },
     enabled: !!selected,
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
   });
 
   const filteredEvents = useMemo(() => {
-    const objs = (objectsData?.rows || []).filter((a: any) => {
-      return a.deviceId === selected?.deviceId || a?.device?.deviceId === selected?.deviceId || a?.device?.name === selected?.name || a?.Device?.name === selected?.name;
-    });
-    const acts = (actionsData?.rows || []).filter((a: any) => {
-      return a.deviceId === selected?.deviceId || a?.device?.deviceId === selected?.deviceId || a?.device?.name === selected?.name || a?.Device?.name === selected?.name;
-    });
-    return [...objs, ...acts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [objectsData, actionsData, selected]);
+    const objs = objectsData?.rows || [];
+    const acts = actionsData?.rows || [];
+    return [...objs, ...acts]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5);
+  }, [objectsData, actionsData]);
 
   function formatShortDate(d: string) {
     if (!d) return '--';
@@ -876,37 +927,109 @@ export default function CamerasScreen() {
             contentContainerStyle={{ padding: 20, paddingTop: 5 }}
             ListHeaderComponent={
               <View style={{ marginBottom: 15 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <Text style={{ color: '#ffffff60', fontSize: 12, fontWeight: '700' }}>UBICACIÓN:</Text>
-                  <Text style={{ color: '#ffffff', fontSize: 13 }}>Sector Principal - {selected?.name?.replace(/_/g, ' ')}</Text>
-                </View>
                 <Text style={styles.eventsTitle}>REGISTROS DE ACTIVIDAD</Text>
               </View>
             }
             renderItem={({ item }) => {
               const urlImage = getMediaUrl(item.url_evidence || item.face_detected_url, domain);
+              
+              let displayTime = '--:--:--';
+              if (item.createdAt) {
+                try {
+                  const date = new Date(item.createdAt);
+                  displayTime = date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                } catch (e) {}
+              }
+
+              let vinfoObj: any = {};
+              if (item.vinfo) {
+                try {
+                  vinfoObj = typeof item.vinfo === 'string' ? JSON.parse(item.vinfo) : item.vinfo;
+                } catch (e) {}
+              }
+
+              const alertName = (
+                vinfoObj?.name ||
+                vinfoObj?.alarm_name ||
+                vinfoObj?.alarmName ||
+                (item.device?.name && item.device.name !== 'Cámara' && item.device.name !== 'Cámara Principal' ? item.device.name : '') ||
+                item.motive_categorie ||
+                'Alerta'
+              ).trim();
+
+              const title = item.tag && item.tag !== 'alert' ? item.tag : 'Alerta';
+
+              const getAnalyticTheme = (tag: string) => {
+                const motive = (tag || '').toLowerCase();
+                if (motive.includes('face') || motive.includes('rostro') || motive.includes('aforo')) {
+                  return { icon: 'person-outline', color: '#5AC8FA' };
+                } else if (motive.includes('intrusion') || motive.includes('critical') || motive.includes('error') || motive.includes('motion')) {
+                  return { icon: 'walk-outline', color: '#F44336' };
+                } else if (motive.includes('lpr') || motive.includes('placa') || motive.includes('car')) {
+                  return { icon: 'car-outline', color: '#2E9BFF' };
+                } else if (motive.includes('objeto') || motive.includes('cube') || motive.includes('arma')) {
+                  return { icon: 'cube-outline', color: '#FF9800' };
+                }
+                return { icon: 'shield-checkmark-outline', color: '#2E9BFF' };
+              };
+
+              const themeStyle = getAnalyticTheme(item.tag || item.motive_categorie || '');
+
               return (
-                <View style={styles.eventRow}>
+                <TouchableOpacity
+                  style={styles.eventRow}
+                  onPress={() => {
+                    setSelected(null);
+                    router.push(`/(tabs)/alerts?alertId=${item.id}&createdAt=${item.createdAt}`);
+                  }}
+                  activeOpacity={0.7}
+                >
                   <ImageBackground
                     source={{ uri: urlImage || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
                     style={styles.eventThumb}
                     imageStyle={{ borderRadius: 6 }}
                   />
                   <View style={styles.eventDetails}>
-                    <Text style={styles.eventTag}>{item.tag?.toUpperCase() || item.motive_categorie?.toUpperCase() || 'ALERTA'}</Text>
-                    <Text style={styles.eventDate}>{formatShortDate(item.createdAt)}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons
+                        name={themeStyle.icon as any}
+                        size={13}
+                        color={themeStyle.color}
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '500' }} numberOfLines={1}>
+                        {title}
+                      </Text>
+                    </View>
+                    <Text style={{ color: '#ffffff60', fontSize: 11, marginTop: 4 }}>
+                      {displayTime} • {alertName}
+                    </Text>
                   </View>
-                  <View style={styles.eventProbBox}>
-                    <Text style={styles.eventProb}>{Math.round(item.probability > 1 ? item.probability : item.probability * 100)}%</Text>
-                    <Text style={styles.eventProbLabel}>PROB.</Text>
+                  <View style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    marginLeft: 8,
+                    backgroundColor: themeStyle.color + '15',
+                    borderColor: themeStyle.color + '40',
+                  }}>
+                    <Text style={{
+                      color: themeStyle.color,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      fontWeight: '600',
+                    }}>
+                      {Math.round(item.probability > 1 ? item.probability : item.probability * 100)}%
+                    </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             }}
             ListEmptyComponent={
               <View style={styles.emptyEvents}>
                 <Ionicons name="folder-open-outline" size={32} color="#ffffff20" />
-                <Text style={styles.emptyEventsText}>No hay eventos registrados para esta cámara.</Text>
+                <Text style={styles.emptyEventsText}>Sin alertas en las últimas 24h</Text>
               </View>
             }
           />

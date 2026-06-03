@@ -22,6 +22,7 @@ import { getAlerts, getWorkspacesEvents, classifyWorkspacesEvent, getMediaUrl, p
 import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
 import { playNotificationSound } from '../../services/sound';
+import { useLocalSearchParams, router } from 'expo-router';
 
 type Alert = {
   id: number;
@@ -34,6 +35,8 @@ type Alert = {
   url_evidence?: string;
   face_detected_url?: string;
   is_confirmed?: boolean | null;
+  is_fp?: boolean | null;
+  is_ignored?: boolean | null;
   state?: string;
   vinfo?: string;
   name_categorie?: string;
@@ -42,8 +45,200 @@ type Alert = {
   sentDescriptions?: Array<{ id: number | string; username: string; description: string; timestamp: string }>;
 };
 
+type AlertCardItemProps = {
+  item: Alert;
+  viewMode: 'grid' | 'list';
+  onPress: (alert: Alert) => void;
+  domain: string | null;
+  formatHora: (fecha: string) => string;
+  getAnalyticTheme: (tag: string) => { color: string; icon: string; label: string };
+  isDarkMode: boolean;
+  styles: any;
+};
+
+// Registry to track alert cards that have already run their neon highlight animation
+const alreadyBlinkedAlerts = new Set<number>();
+
+function AlertCardItem({
+  item,
+  viewMode,
+  onPress,
+  domain,
+  formatHora,
+  getAnalyticTheme,
+  isDarkMode,
+  styles
+}: AlertCardItemProps) {
+  const [isNew, setIsNew] = useState(false);
+  const blinkAnim = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    // If this alert has already run its blink animation during this app session, skip it
+    if (alreadyBlinkedAlerts.has(item.id)) {
+      setIsNew(false);
+      return;
+    }
+
+    let animation: Animated.CompositeAnimation | null = null;
+    const alertTime = parseUTCDate(item.createdAt).getTime();
+    const systemTime = new Date().getTime();
+    const diffSeconds = (systemTime - alertTime) / 1000;
+
+    const isWithin30s = diffSeconds >= 0 && diffSeconds < 30;
+
+    if (isWithin30s) {
+      setIsNew(true);
+      alreadyBlinkedAlerts.add(item.id);
+
+      animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(blinkAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(blinkAnim, {
+            toValue: 0.3,
+            duration: 500,
+            useNativeDriver: true,
+          })
+        ])
+      );
+      animation.start();
+
+      const timer = setTimeout(() => {
+        setIsNew(false);
+        if (animation) animation.stop();
+      }, 10000);
+
+      return () => {
+        clearTimeout(timer);
+        if (animation) animation.stop();
+      };
+    } else {
+      setIsNew(false);
+    }
+  }, [item.createdAt, item.id]);
+
+  const typeTag = item.motive_categorie || item.tag || 'Detección General';
+  const theme = getAnalyticTheme(typeTag);
+
+  const probNum = Number(item.probability) || 0;
+  const prob = probNum > 1 ? probNum : probNum * 100;
+
+  const isResolved = item.is_confirmed === true || item.is_fp === true || item.is_ignored === true || item.state === 'resolved' || item.state === 'ignored';
+
+  const getEvidenceUrl = (alertItem: Alert) => {
+    return getMediaUrl(alertItem.url_evidence, domain);
+  };
+
+  if (viewMode === 'grid') {
+    return (
+      <TouchableOpacity
+        style={[
+          styles.gridCard,
+          isNew && { borderColor: '#ff0055', borderWidth: 1 }
+        ]}
+        activeOpacity={0.8}
+        onPress={() => onPress(item)}
+      >
+        <View style={styles.gridCardHeader}>
+          <Ionicons name="videocam" size={12} color="#2E9BFF" style={{ marginRight: 2 }} />
+          <Text style={styles.gridCardCamName} numberOfLines={1}>
+            {item.device?.name || 'Cámara'}
+          </Text>
+        </View>
+
+        <Image
+          source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
+          style={styles.gridCardImage}
+          resizeMode="cover"
+        />
+
+        <View style={styles.gridCardFooter}>
+          <Text style={styles.gridCardTitle} numberOfLines={1}>
+            {typeTag}
+          </Text>
+          <View style={styles.gridCardLabelRow}>
+            <Text style={styles.gridCardLabel}>PROB.</Text>
+            <Text style={styles.gridCardLabel}>HORA</Text>
+          </View>
+          <View style={styles.gridCardValueRow}>
+            <Text style={styles.gridCardProbValue}>{prob.toFixed(0)}%</Text>
+            <Text style={styles.gridCardTimeValue}>{formatHora(item.createdAt)}</Text>
+          </View>
+        </View>
+
+        {isNew && (
+          <Animated.View style={[
+            styles.neonBorder,
+            {
+              opacity: blinkAnim,
+              borderRadius: 14
+            }
+          ]} />
+        )}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.card,
+        { borderColor: isNew ? '#ff0055' : theme.color + '40' },
+        isNew && { borderWidth: 1.5 }
+      ]}
+      activeOpacity={0.8}
+      onPress={() => onPress(item)}
+    >
+      <ImageBackground
+        source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
+        style={styles.cardImage}
+        imageStyle={{ opacity: 0.8 }}
+      >
+        <View style={styles.cardOverlayTop}>
+          <View style={[styles.badge, { backgroundColor: isResolved ? (item.is_confirmed === true ? '#4caf50' : item.is_fp === true ? '#ff9800' : '#ffffff60') : '#2196f3' }]}>
+            <Text style={styles.badgeText}>
+              {isResolved ? (item.is_confirmed === true ? 'CONFIRMADA' : item.is_fp === true ? 'FALSO POS.' : 'IGNORADA') : 'PENDIENTE'}
+            </Text>
+          </View>
+        </View>
+      </ImageBackground>
+
+      <View style={styles.cardFooter}>
+        <View style={styles.footerRow}>
+          <View style={styles.footerInfo}>
+            <Text style={[styles.cardTipo, { color: theme.color }]}>
+              <Ionicons name={theme.icon as any} size={14} /> {typeTag.toUpperCase()}
+            </Text>
+            <Text style={styles.cardCam} numberOfLines={1}>
+              {item.device?.name || item.deviceId || 'Cámara no especificada'}
+            </Text>
+          </View>
+          <View style={styles.footerMetrics}>
+            <Text style={styles.cardHora}>{formatHora(item.createdAt)}</Text>
+            <Text style={styles.cardProb}>{prob.toFixed(0)}%</Text>
+          </View>
+        </View>
+      </View>
+
+      {isNew && (
+        <Animated.View style={[
+          styles.neonBorder,
+          {
+            opacity: blinkAnim,
+            borderRadius: 16
+          }
+        ]} />
+      )}
+    </TouchableOpacity>
+  );
+}
+
 export default function AlertsScreen() {
   const { activeDomain: domain, jwtToken: token, isDarkMode, userData, workspaceSessions, activeWorkspace, impersonatedWorkspace } = useAppStore();
+  const { alertId, createdAt } = useLocalSearchParams<{ alertId?: string; createdAt?: string }>();
   const currentWs = impersonatedWorkspace || activeWorkspace;
   const isLocal = currentWs?.type === 'local';
 
@@ -55,7 +250,11 @@ export default function AlertsScreen() {
 
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [loadingSingleAlert, setLoadingSingleAlert] = useState(false);
   const devicesMapRef = useRef<Record<string, string>>({});
 
   // States for Incident Minuta Note
@@ -133,10 +332,140 @@ export default function AlertsScreen() {
   }, [domain, activeSession]);
 
   useEffect(() => {
-    cargarAlertas();
+    cargarAlertas(1, false);
   }, [activeSession, domain]);
 
-  async function cargarAlertas() {
+  useEffect(() => {
+    if (!alertId) return;
+
+    const targetId = Number(alertId);
+    const matchedAlert = alerts.find(a => Number(a.id) === targetId);
+
+    if (matchedAlert) {
+      setSelectedAlert(matchedAlert);
+      router.setParams({ alertId: undefined, createdAt: undefined });
+    } else {
+      // Si la alerta no está en la memoria inicial, la buscamos directamente en el backend
+      // usando un micro-rango de tiempo de 20 segundos alrededor de su fecha de creación.
+      buscarYAbrirAlertaIndividual(targetId, createdAt);
+    }
+  }, [alertId, alerts, createdAt]);
+
+  async function buscarYAbrirAlertaIndividual(targetId: number, targetCreatedAt?: string) {
+    if (activeSession.length === 0) return;
+    setLoadingSingleAlert(true);
+    try {
+      // Determinamos el micro-rango de fecha de 20 segundos (10s antes y 10s después de la alerta)
+      let fromDate: Date;
+      let toDate: Date;
+
+      if (targetCreatedAt) {
+        const alertTime = new Date(targetCreatedAt);
+        fromDate = new Date(alertTime.getTime() - 10 * 1000);
+        toDate = new Date(alertTime.getTime() + 10 * 1000);
+      } else {
+        // Fallback defensivo si no viene la fecha: últimas 24h
+        toDate = new Date();
+        fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
+      }
+
+      const formatLimaISO = (d: Date) => {
+        const options = {
+          timeZone: 'America/Lima',
+          year: 'numeric' as const, month: '2-digit' as const, day: '2-digit' as const,
+          hour: '2-digit' as const, minute: '2-digit' as const, second: '2-digit' as const,
+          hour12: false
+        };
+        const formatter = new Intl.DateTimeFormat('en-US', options);
+        const parts = formatter.formatToParts(d);
+        const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
+        return `${getVal('year')}-${getVal('month')}-${getVal('day')}T${getVal('hour')}:${getVal('minute')}:${getVal('second')}-05:00`;
+      };
+
+      const [alertsData, smartEventsData] = await Promise.all([
+        getWorkspacesEvents({
+          sessions: activeSession,
+          eventType: 'alert',
+          from: formatLimaISO(fromDate),
+          to: formatLimaISO(toDate),
+          timezone: 'America/Lima',
+          page: 1,
+          limit: 10
+        }).catch(() => null),
+        getWorkspacesEvents({
+          sessions: activeSession,
+          eventType: 'smart_event',
+          from: formatLimaISO(fromDate),
+          to: formatLimaISO(toDate),
+          timezone: 'America/Lima',
+          page: 1,
+          limit: 10
+        }).catch(() => null)
+      ]);
+
+      const rawRows = [
+        ...(alertsData?.rows || []),
+        ...(smartEventsData?.rows || [])
+      ];
+
+      const mappedRows = rawRows.map((alert: any) => {
+        const devId = alert.device_id || alert.deviceId || alert.device?.id || alert.device?.deviceId;
+        let matchedName = '';
+        if (devId && devicesMapRef.current[String(devId)]) matchedName = devicesMapRef.current[String(devId)];
+        if (!matchedName && alert.device?.name && alert.device.name !== 'Cámara' && alert.device.name !== 'Cámara Principal') {
+          matchedName = alert.device.name;
+        }
+        if (!matchedName) {
+          if (alert.motive_categorie && alert.motive_categorie !== 'Alert' && alert.motive_categorie.includes('_')) matchedName = alert.motive_categorie;
+          else if (alert.title && alert.title !== 'Alert' && alert.title.includes('_')) matchedName = alert.title;
+        }
+
+        const normalizedMotive = alert.motive_categorie || alert.motive || alert.title || alert.label || alert.name || getTrueAlertName(alert.tag || 'alert');
+
+        return {
+          ...alert,
+          motive_categorie: normalizedMotive,
+          device: { ...alert.device, name: matchedName || 'Cámara' }
+        };
+      });
+
+      // Deduplicamos los resultados por ID
+      const uniqueRowsMap = new Map<number, any>();
+      mappedRows.forEach(item => {
+        if (item && item.id) {
+          uniqueRowsMap.set(Number(item.id), item);
+        }
+      });
+
+      const matchedAlert = uniqueRowsMap.get(targetId);
+      if (matchedAlert) {
+        setSelectedAlert(matchedAlert);
+      } else {
+        console.log(`[ALERTA INDIVIDUAL] ⚠️ No se encontró la alerta ID ${targetId} en el micro-rango de 20s.`);
+        RNAlert.alert('Alerta no encontrada', 'La alerta seleccionada no pudo ser localizada en el registro de las últimas 24 horas.');
+      }
+      router.setParams({ alertId: undefined, createdAt: undefined });
+    } catch (err) {
+      console.log('Error buscando alerta individual:', err);
+    } finally {
+      setLoadingSingleAlert(false);
+    }
+  }
+
+  function cargarMasAlertas() {
+    if (loading || loadingMore || !hasMore) return;
+    const nextPage = page + 1;
+    setPage(nextPage);
+    cargarAlertas(nextPage, true);
+  }
+
+  async function cargarAlertas(pageToLoad = 1, isNextPage = false) {
+    if (pageToLoad === 1) {
+      setLoading(true);
+      setHasMore(true);
+    } else {
+      setLoadingMore(true);
+    }
     try {
       // 1. Mapa de dispositivos — siempre via gateway
       let devicesMap: Record<string, string> = {};
@@ -178,14 +507,15 @@ export default function AlertsScreen() {
         return `${getVal('year')}-${getVal('month')}-${getVal('day')}T${getVal('hour')}:${getVal('minute')}:${getVal('second')}-05:00`;
       };
 
+      const limitPerPage = 30;
       const data = await getWorkspacesEvents({
         sessions: activeSession,
         eventType: 'alert',
         from: formatLimaISO(fromDate),
         to: formatLimaISO(toDate),
         timezone: 'America/Lima',
-        page: 1,
-        limit: 100
+        page: pageToLoad,
+        limit: limitPerPage
       });
 
       // 3. Cruzar con mapa de dispositivos
@@ -212,11 +542,29 @@ export default function AlertsScreen() {
         };
       });
 
-      setAlerts(mappedRows);
+      if (isNextPage) {
+        setAlerts(prev => {
+          const merged = [...prev, ...mappedRows];
+          if (merged.length >= 150) {
+            setHasMore(false);
+            return merged.slice(0, 150);
+          }
+          return merged;
+        });
+      } else {
+        setAlerts(mappedRows);
+        setPage(1);
+        if (mappedRows.length < limitPerPage || mappedRows.length >= 150) {
+          setHasMore(false);
+        } else {
+          setHasMore(true);
+        }
+      }
     } catch (e) {
       console.log('Error alertas:', e);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }
 
@@ -244,6 +592,12 @@ export default function AlertsScreen() {
       const newAlerts: Alert[] = [];
 
       alertsArray.forEach(rawData => {
+        // Only process events that have an associated alarm configuration/rule (Smart Events)
+        const hasRule = !!(rawData.ruleId || rawData.rule_id || rawData.vinfo);
+        if (!hasRule) {
+          return;
+        }
+
         const id = rawData.id ?? Math.floor(Math.random() * 1000000);
 
         const tag = rawData.tag || (channel === 'event_motion' ? 'motion' : channel) || 'alert';
@@ -325,6 +679,8 @@ export default function AlertsScreen() {
         newAlerts.push({
           id, probability, createdAt, device, tag, motive_categorie, url_evidence, face_detected_url,
           is_confirmed: rawData.is_confirmed ?? null,
+          is_fp: rawData.is_fp ?? null,
+          is_ignored: rawData.is_ignored ?? null,
           state: rawData.state ?? 'pending',
           vinfo: typeof rawData.vinfo === 'string' ? rawData.vinfo : JSON.stringify(rawData.vinfo || {}),
           name_categorie: rawData.name_categorie || undefined
@@ -402,6 +758,8 @@ export default function AlertsScreen() {
         return {
           ...a,
           is_confirmed: action === 'CONFIRM' ? true : action === 'FALSE_POSITIVE' ? false : null,
+          is_fp: action === 'FALSE_POSITIVE' ? true : false,
+          is_ignored: action === 'IGNORE' ? true : false,
           state: action === 'IGNORE' ? 'ignored' : 'resolved'
         };
       }
@@ -412,6 +770,8 @@ export default function AlertsScreen() {
       setSelectedAlert(prev => prev ? {
         ...prev,
         is_confirmed: action === 'CONFIRM' ? true : action === 'FALSE_POSITIVE' ? false : null,
+        is_fp: action === 'FALSE_POSITIVE' ? true : false,
+        is_ignored: action === 'IGNORE' ? true : false,
         state: action === 'IGNORE' ? 'ignored' : 'resolved'
       } : null);
     }
@@ -590,102 +950,52 @@ export default function AlertsScreen() {
         data={filteredAlerts}
         keyExtractor={(item, index) => `${item.id}-${index}`}
         contentContainerStyle={styles.lista}
-        renderItem={({ item }) => {
-          const typeTag = item.motive_categorie || item.tag || 'Detección General';
-          const theme = getAnalyticTheme(typeTag);
-
-          const probNum = Number(item.probability) || 0;
-          const prob = probNum > 1 ? probNum : probNum * 100;
-
-          const isResolved = item.is_confirmed === true || item.is_confirmed === false || item.state === 'resolved' || item.state === 'ignored';
-
-          if (viewMode === 'grid') {
-            return (
-              <TouchableOpacity
-                style={styles.gridCard}
-                activeOpacity={0.8}
-                onPress={() => setSelectedAlert(item)}
-              >
-                {/* Header interno del card */}
-                <View style={styles.gridCardHeader}>
-                  <Ionicons name="videocam" size={12} color="#2E9BFF" style={{ marginRight: 2 }} />
-                  <Text style={styles.gridCardCamName} numberOfLines={1}>
-                    {item.device?.name || 'Cámara'}
-                  </Text>
-                </View>
-
-                {/* Evidencia del card */}
-                <Image
-                  source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
-                  style={styles.gridCardImage}
-                  resizeMode="cover"
-                />
-
-                {/* Footer del card */}
-                <View style={styles.gridCardFooter}>
-                  <Text style={styles.gridCardTitle} numberOfLines={1}>
-                    {typeTag}
-                  </Text>
-                  <View style={styles.gridCardLabelRow}>
-                    <Text style={styles.gridCardLabel}>PROB.</Text>
-                    <Text style={styles.gridCardLabel}>HORA</Text>
-                  </View>
-                  <View style={styles.gridCardValueRow}>
-                    <Text style={styles.gridCardProbValue}>{prob.toFixed(0)}%</Text>
-                    <Text style={styles.gridCardTimeValue}>{formatHora(item.createdAt)}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          }
-
-          // viewMode === 'list' (Diseño original detallado en feed único)
-          return (
-            <TouchableOpacity
-              style={[styles.card, { borderColor: theme.color + '40' }]}
-              activeOpacity={0.8}
-              onPress={() => setSelectedAlert(item)}
-            >
-              <ImageBackground
-                source={{ uri: getEvidenceUrl(item) || 'https://images.unsplash.com/photo-1557597774-9d273605dfa9' }}
-                style={styles.cardImage}
-                imageStyle={{ opacity: 0.8 }}
-              >
-                <View style={styles.cardOverlayTop}>
-                  <View style={[styles.badge, { backgroundColor: isResolved ? (item.is_confirmed === true ? '#4caf50' : item.is_confirmed === false ? '#ff9800' : '#ffffff60') : '#2196f3' }]}>
-                    <Text style={styles.badgeText}>
-                      {isResolved ? (item.is_confirmed === true ? 'CONFIRMADA' : item.is_confirmed === false ? 'FALSO POS.' : 'IGNORADA') : 'PENDIENTE'}
-                    </Text>
-                  </View>
-                </View>
-              </ImageBackground>
-
-              <View style={styles.cardFooter}>
-                <View style={styles.footerRow}>
-                  <View style={styles.footerInfo}>
-                    <Text style={[styles.cardTipo, { color: theme.color }]}>
-                      <Ionicons name={theme.icon as any} size={14} /> {typeTag.toUpperCase()}
-                    </Text>
-                    <Text style={styles.cardCam} numberOfLines={1}>
-                      {item.device?.name || item.deviceId || 'Cámara no especificada'}
-                    </Text>
-                  </View>
-                  <View style={styles.footerMetrics}>
-                    <Text style={styles.cardHora}>{formatHora(item.createdAt)}</Text>
-                    <Text style={styles.cardProb}>{prob.toFixed(0)}%</Text>
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
+        renderItem={({ item }) => (
+          <AlertCardItem
+            item={item}
+            viewMode={viewMode}
+            onPress={setSelectedAlert}
+            domain={domain}
+            formatHora={formatHora}
+            getAnalyticTheme={getAnalyticTheme}
+            isDarkMode={isDarkMode}
+            styles={styles}
+          />
+        )}
         ListEmptyComponent={
           <View style={styles.centrado}>
             <Ionicons name="shield-checkmark" size={48} color="#ffffff20" />
             <Text style={styles.vacio}>Sistema Seguro. Sin alertas recientes.</Text>
           </View>
         }
+        onEndReached={cargarMasAlertas}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#2E9BFF" />
+            </View>
+          ) : !hasMore && alerts.length > 0 ? (
+            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+              <Text style={{ color: '#ffffff40', fontSize: 11, fontWeight: '600' }}>
+                Fin del historial reciente (Máx. 150 alertas)
+              </Text>
+            </View>
+          ) : null
+        }
       />
+
+      {/* MODAL DE CARGA TRANSPARENTE PARA ALERTA INDIVIDUAL */}
+      {loadingSingleAlert && (
+        <Modal transparent={true} visible={true} animationType="fade">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: '#161622', padding: 20, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#ffffff10' }}>
+              <ActivityIndicator size="large" color="#2E9BFF" />
+              <Text style={{ color: '#fff', marginTop: 10, fontSize: 13, fontWeight: '600' }}>Cargando detalles de alerta...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* MODAL DETALLE (Estilo Maqueta SIVI Premium) */}
       <Modal
@@ -790,10 +1100,40 @@ export default function AlertsScreen() {
                   }
                 }
 
-                const alarmName = selectedAlert.name_categorie || vinfoObj?.alarm_name || vinfoObj?.alarmName || selectedAlert.motive_categorie || (selectedAlert as any).title || (selectedAlert as any).motive || selectedAlert.tag || 'Alerta de Seguridad';
+                const alarmName = (
+                  vinfoObj?.name ||
+                  vinfoObj?.alarm_name ||
+                  vinfoObj?.alarmName ||
+                  selectedAlert.motive_categorie ||
+                  selectedAlert.name_categorie ||
+                  (selectedAlert as any).title ||
+                  (selectedAlert as any).motive ||
+                  selectedAlert.tag ||
+                  'Alerta de Seguridad'
+                ).trim();
 
-                const scheduleVal = vinfoObj?.schedule || "00:00:00 - 23:59:00";
-                const intervalVal = vinfoObj?.interval || "daily";
+                let scheduleVal = "00:00:00 - 23:59:00";
+                let intervalVal = "daily";
+
+                if (vinfoObj?.schedule) {
+                  scheduleVal = vinfoObj.schedule;
+                } else {
+                  const detailDev = vinfoObj?.Detail_device_alarm?.[0];
+                  const detailSched = detailDev?.detail_schedule_device?.[0];
+                  if (detailSched?.start && detailSched?.end) {
+                    scheduleVal = `${detailSched.start} - ${detailSched.end}`;
+                  }
+                }
+
+                if (vinfoObj?.interval) {
+                  intervalVal = vinfoObj.interval;
+                } else {
+                  const detailDev = vinfoObj?.Detail_device_alarm?.[0];
+                  const detailSched = detailDev?.detail_schedule_device?.[0];
+                  if (detailSched?.interval) {
+                    intervalVal = detailSched.interval;
+                  }
+                }
 
                 return (
                   <View style={styles.infoSectionMockup}>
@@ -822,9 +1162,9 @@ export default function AlertsScreen() {
 
               {/* Acciones de Resolución o Registro de Minutas */}
               {selectedAlert && (() => {
-                const isResolved = selectedAlert.is_confirmed === true || selectedAlert.is_confirmed === false || selectedAlert.state === 'resolved' || selectedAlert.state === 'ignored';
-                const resolvedLabel = selectedAlert.is_confirmed === true ? 'ALERTA CONFIRMADA' : selectedAlert.is_confirmed === false ? 'FALSO POSITIVO' : 'ALERTA IGNORADA';
-                const resolvedColor = selectedAlert.is_confirmed === true ? '#4CAF50' : selectedAlert.is_confirmed === false ? '#FF9800' : '#ffffff60';
+                const isResolved = selectedAlert.is_confirmed === true || selectedAlert.is_fp === true || selectedAlert.is_ignored === true || selectedAlert.state === 'resolved' || selectedAlert.state === 'ignored';
+                const resolvedLabel = selectedAlert.is_confirmed === true ? 'ALERTA CONFIRMADA' : selectedAlert.is_fp === true ? 'FALSO POSITIVO' : 'ALERTA IGNORADA';
+                const resolvedColor = selectedAlert.is_confirmed === true ? '#4CAF50' : selectedAlert.is_fp === true ? '#FF9800' : '#ffffff60';
 
                 return (
                   <View style={styles.resolutionSectionMockup}>
@@ -978,6 +1318,21 @@ export default function AlertsScreen() {
               const probNum = Number(realTimePopupAlert.probability) || 0;
               const prob = probNum > 1 ? probNum : probNum * 100;
 
+              let popupVinfo: any = {};
+              if (realTimePopupAlert.vinfo) {
+                try {
+                  popupVinfo = typeof realTimePopupAlert.vinfo === 'string' ? JSON.parse(realTimePopupAlert.vinfo) : realTimePopupAlert.vinfo;
+                } catch (e) {}
+              }
+              const popupAlarmName = (
+                popupVinfo?.name ||
+                popupVinfo?.alarm_name ||
+                popupVinfo?.alarmName ||
+                realTimePopupAlert.motive_categorie ||
+                realTimePopupAlert.name_categorie ||
+                'Alerta de Seguridad'
+              ).trim();
+
               return (
                 <>
                   <View style={[styles.popupAccentLine, { backgroundColor: theme.color }]} />
@@ -1008,7 +1363,7 @@ export default function AlertsScreen() {
                           </Text>
                         </View>
                         <Text style={styles.popupAlarmName} numberOfLines={1}>
-                          {realTimePopupAlert.name_categorie || realTimePopupAlert.motive_categorie || 'Alerta de Seguridad'}
+                          {popupAlarmName}
                         </Text>
                         <View style={styles.popupMetricsRow}>
                           <Text style={styles.popupMetricLabel}>Probabilidad: </Text>
@@ -1772,6 +2127,21 @@ const getStyles = (isDark: boolean) => {
       fontSize: 10,
       fontWeight: '800',
       letterSpacing: 0.5,
+    },
+    neonBorder: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      borderWidth: 2,
+      borderColor: '#ff0055',
+      pointerEvents: 'none',
+      shadowColor: '#ff0055',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.8,
+      shadowRadius: 8,
+      elevation: 5,
     },
   });
 };

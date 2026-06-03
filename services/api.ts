@@ -537,7 +537,7 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
     const dateFromISO = formatLocalISO(dateFrom);
     const dateToISO = formatLocalISO(dateTo);
 
-    const { impersonatedWorkspace, activeWorkspace } = useAppStore.getState();
+    const { impersonatedWorkspace, activeWorkspace, workspaceSessions } = useAppStore.getState();
     const currentWs = impersonatedWorkspace || activeWorkspace;
     const wsId = currentWs?.id || currentWs?.workspace || '';
 
@@ -550,9 +550,25 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
     let resClassified = null;
     let resOperatorTime = null;
 
+    // Rango independiente para las últimas alertas (momento exacto actual - 24 horas)
+    const toRecent = new Date();
+    const fromRecent = new Date(toRecent.getTime() - 24 * 60 * 60 * 1000);
+    const fromRecentISO = formatLocalISO(fromRecent);
+    const toRecentISO = formatLocalISO(toRecent);
+
+    const activeSession = workspaceSessions?.find(s => s.workspace?.toLowerCase() === wsId.toLowerCase());
+
     const [camsRes, alertsRes, consolidado] = await Promise.all([
       getWorkspaceState().catch(() => null),
-      getAlerts(1).catch(() => null),
+      activeSession ? getWorkspacesEvents({
+        sessions: [activeSession],
+        eventType: 'alert',
+        from: fromRecentISO,
+        to: toRecentISO,
+        timezone: 'America/Lima',
+        page: 1,
+        limit: 5
+      }).catch(() => null) : Promise.resolve(null),
       getWorkspacesAlertsDashboard({
         timePreset: 'custom',
         timezone: 'America/Lima',
@@ -563,6 +579,7 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
 
     stateRes = camsRes;
     alertsPage1Res = alertsRes;
+
 
     let chartsSuccess = false;
 
@@ -609,16 +626,8 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
     }
 
     const allRows = (alertsPage1Res && Array.isArray(alertsPage1Res.rows)) ? alertsPage1Res.rows : [];
-    const fromTimeLimit = dateFrom.getTime();
-    const toTimeLimit = dateTo.getTime() + (60 * 60 * 1000);
-    const filteredAllRows = allRows.filter((item: any) => {
-      const dateStr = item.createdAt || item.created_at;
-      if (!dateStr) return false;
-      const itemTime = parseUTCDate(dateStr).getTime();
-      return !isNaN(itemTime) && itemTime >= fromTimeLimit && itemTime <= toTimeLimit;
-    });
 
-    const recentAlerts = filteredAllRows.slice(0, 10).map((alert: any) => {
+    const recentAlerts = allRows.slice(0, 5).map((alert: any) => {
       let type = 'primary';
       let icon = 'shield-checkmark-outline';
       const motive = (alert.motive_categorie || '').toLowerCase();
