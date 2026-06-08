@@ -23,10 +23,10 @@
     "android": {
       "versionCode": 3,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon-sivi.png",
+        "foregroundImage": "./assets/icon-sisvi.png",
         "backgroundColor": "#000000"
       },
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
       "package": "com.soportesivi.AliceGuardianApp",
       "usesCleartextTraffic": true

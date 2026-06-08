@@ -1,16 +1,6 @@
 import { WORKSPACES, PROD_API_DOMAIN } from '../constants/config';
 import { useAppStore } from './store';
 
-export function isLocalDomain(domain: string | null | undefined): boolean {
-  if (!domain) return false;
-  return (
-    /^\d+\.\d+\.\d+\.\d+/.test(domain) ||
-    domain.includes('localhost') ||
-    domain.includes(':') ||
-    domain.includes('.local')
-  );
-}
-
 export function parseUTCDate(dateStr: string | Date | null | undefined): Date {
   if (!dateStr) return new Date();
   if (dateStr instanceof Date) return dateStr;
@@ -961,30 +951,6 @@ export async function getDevices(page = 1) {
   return { rows: wsData?.devices || [] };
 }
 
-export async function getFaces(page = 1) {
-  return getAlerts(page);
-}
-
-export async function getObjects(page = 1) {
-  const { impersonatedWorkspace, activeWorkspace } = useAppStore.getState();
-  const wsId = (impersonatedWorkspace || activeWorkspace)?.id || '';
-  const res = await fetchGateway('/mobile/workspaces/events', {
-    eventType: 'smart_event',
-    page,
-    limit: 30
-  });
-  const wsData = res.workspaces?.find((w: any) => w.workspace?.toLowerCase() === wsId.toLowerCase());
-  const rows = wsData?.rows || [];
-  return normalizeAlertsData({ rows });
-}
-
-export async function getMotion(page = 1) {
-  return getAlerts(page);
-}
-
-export async function getTrainedFaces() {
-  return [];
-}
 
 export async function getWorkspaces(): Promise<any[]> {
   const { workspaceSessions } = useAppStore.getState();
@@ -997,13 +963,6 @@ export async function getWorkspaces(): Promise<any[]> {
   }));
 }
 
-export async function getUsers() {
-  return { rows: [] };
-}
-
-export async function getDisks() {
-  return { rows: [] };
-}
 
 export async function getWorkspacesDevices(sessions: any[]) {
   return fetchGateway('/mobile/workspaces/devices');
@@ -1096,7 +1055,6 @@ export async function searchForense(params: {
 }
 
 export async function classifyWorkspacesEvent(params: {
-  sessions?: any[];
   eventType: string;
   eventId: number;
   classification: 'confirm' | 'ignore' | 'false_positive';
@@ -1133,14 +1091,6 @@ export async function falsePositiveAlert(eventId: number | string) {
     eventType: 'alert',
     eventId: Number(eventId),
     classification: 'false_positive'
-  });
-}
-
-export async function ignoreAlert(eventId: number | string) {
-  return classifyWorkspacesEvent({
-    eventType: 'alert',
-    eventId: Number(eventId),
-    classification: 'ignore'
   });
 }
 
@@ -1205,10 +1155,6 @@ export async function getWorkspacesEvents(params: {
   }
 }
 
-export async function getWorkspacesAlarmConfigurations(sessions?: any[]) {
-  return fetchGateway('/mobile/workspaces/alarms/configurations');
-}
-
 export async function updateWorkspaceAlarmConfiguration(params: {
   alarmId: number;
   alarm?: {
@@ -1259,11 +1205,4 @@ export async function getWorkspaceAlarmConfigurationDetail(alarmId: number | str
 
   return wsData.alarm;
 }
-
-export async function getAlarmSounds() {
-  const { impersonatedWorkspace, activeWorkspace } = useAppStore.getState();
-  const wsId = (impersonatedWorkspace || activeWorkspace)?.id || '';
-  const res = await fetchGateway('/mobile/workspaces/alarms/sounds');
-  const wsData = res.workspaces?.find((w: any) => w.workspace?.toLowerCase() === wsId.toLowerCase());
-  return wsData?.sounds || [];
-}
+

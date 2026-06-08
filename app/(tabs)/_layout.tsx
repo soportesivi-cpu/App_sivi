@@ -13,7 +13,7 @@ const SIVI_THEME = {
 };
 
 export default function TabsLayout() {
-  const { userData, impersonatedWorkspace, activeWorkspace } = useAppStore();
+  const { userData, impersonatedWorkspace } = useAppStore();
   const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
   const restrictAccess = isSuperAdmin && !impersonatedWorkspace;
   const hideCameras = restrictAccess;

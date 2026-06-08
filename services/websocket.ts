@@ -275,9 +275,6 @@ export class AlertSocketService {
     console.log('[WS] ⛔ Todos los sockets desconectados intencionalmente');
   }
 
-  isConnected(): boolean {
-    return this.sockets.some(socket => socket.connected);
-  }
 }
 
 // Instancia singleton para toda la app

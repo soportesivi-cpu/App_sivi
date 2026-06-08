@@ -217,6 +217,37 @@ export default function AdminDashboard() {
             })}
           </ScrollView>
 
+          {/* SECCIÓN TIEMPO DE RESPUESTA DEL OPERADOR */}
+          <View style={styles.responseTimeContainer}>
+            <Text style={styles.classificationTitle}>TIEMPO DE RESPUESTA DEL OPERADOR</Text>
+            
+            <View style={styles.responseTimeRow}>
+              {/* Promedio */}
+              <View style={[styles.responseCol, styles.rightBorder]}>
+                <Text style={styles.responseLabel}>Promedio</Text>
+                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.avg || '4.1 h'}</Text>
+              </View>
+              
+              {/* Mediana */}
+              <View style={[styles.responseCol, styles.rightBorder]}>
+                <Text style={styles.responseLabel}>Mediana</Text>
+                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.median || '7.5 h'}</Text>
+              </View>
+              
+              {/* Mínimo */}
+              <View style={[styles.responseCol, styles.rightBorder]}>
+                <Text style={styles.responseLabel}>Mínimo</Text>
+                <Text style={styles.responseValueGreen}>{dashboardData.responseTime?.min || '2.6 h'}</Text>
+              </View>
+              
+              {/* % sin respuesta */}
+              <View style={styles.responseCol}>
+                <Text style={styles.responseLabel}>% sin respuesta</Text>
+                <Text style={styles.responseValueYellow}>{dashboardData.responseTime?.unanswered || '0%'}</Text>
+              </View>
+            </View>
+          </View>
+
           {/* CUADRICULA DE MÉTRICAS 2x2 (Diseño exacto de la imagen de Stitch) */}
           <View style={styles.gridContainer}>
             {/* CARD 1: TOTAL ALERTAS */}
@@ -384,37 +415,6 @@ export default function AdminDashboard() {
                     {dashboardData.classification?.pending || 0} ({dashboardData.metrics?.total > 0 ? (((dashboardData.classification?.pending || 0) / dashboardData.metrics?.total) * 100).toFixed(2) : "100.00"}%)
                   </Text>
                 </View>
-              </View>
-            </View>
-          </View>
-
-          {/* SECCIÓN TIEMPO DE RESPUESTA DEL OPERADOR */}
-          <View style={styles.responseTimeContainer}>
-            <Text style={styles.classificationTitle}>TIEMPO DE RESPUESTA DEL OPERADOR</Text>
-            
-            <View style={styles.responseTimeRow}>
-              {/* Promedio */}
-              <View style={[styles.responseCol, styles.rightBorder]}>
-                <Text style={styles.responseLabel}>Promedio</Text>
-                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.avg || '4.1 h'}</Text>
-              </View>
-              
-              {/* Mediana */}
-              <View style={[styles.responseCol, styles.rightBorder]}>
-                <Text style={styles.responseLabel}>Mediana</Text>
-                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.median || '7.5 h'}</Text>
-              </View>
-              
-              {/* Mínimo */}
-              <View style={[styles.responseCol, styles.rightBorder]}>
-                <Text style={styles.responseLabel}>Mínimo</Text>
-                <Text style={styles.responseValueGreen}>{dashboardData.responseTime?.min || '2.6 h'}</Text>
-              </View>
-              
-              {/* % sin respuesta */}
-              <View style={styles.responseCol}>
-                <Text style={styles.responseLabel}>% sin respuesta</Text>
-                <Text style={styles.responseValueYellow}>{dashboardData.responseTime?.unanswered || '0%'}</Text>
               </View>
             </View>
           </View>

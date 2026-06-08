@@ -6,7 +6,6 @@ type AppState = {
   isHydrated: boolean;
   activeDomain: string | null;
   jwtToken: string | null;
-  workspaceToken: string | null; // <-- Token interno del workspace para consultar datos
   workspaceSessions: any[] | null; // <-- NUEVO: Sesiones completas de workspaces del orquestador
   userData: any | null;
   activeWorkspace: any | null; // <-- Guarda el workspace activo completo
@@ -25,7 +24,6 @@ export const useAppStore = create<AppState>((set) => ({
   isHydrated: false,
   activeDomain: null,
   jwtToken: null,
-  workspaceToken: null,
   workspaceSessions: null, // <-- VALOR INICIAL
   userData: null,
   activeWorkspace: null,
@@ -37,7 +35,6 @@ export const useAppStore = create<AppState>((set) => ({
     try {
       const domain = await SecureStore.getItemAsync('active_domain');
       const token = await SecureStore.getItemAsync('jwt_token');
-      const wsToken = await SecureStore.getItemAsync('workspace_token');
       const wsSessions = await SecureStore.getItemAsync('workspace_sessions'); // <-- Cargar sesiones
       const user = await SecureStore.getItemAsync('user_data');
       const ws = await SecureStore.getItemAsync('active_workspace');
@@ -67,7 +64,6 @@ export const useAppStore = create<AppState>((set) => ({
         isHydrated: true,
         activeDomain: domain,
         jwtToken: token,
-        workspaceToken: wsToken,
         workspaceSessions: parsedSessions,
         userData: parsedUser,
         activeWorkspace: parsedWs,
@@ -86,7 +82,7 @@ export const useAppStore = create<AppState>((set) => ({
     await SecureStore.setItemAsync('user_data', JSON.stringify(user));
     await SecureStore.setItemAsync('active_workspace', JSON.stringify(workspace));
     await SecureStore.setItemAsync('workspace_sessions', JSON.stringify(sessions)); // Guardar sesiones
-    set({ activeDomain: domain, workspaceToken: token, jwtToken: jwt, userData: user, activeWorkspace: workspace, workspaceSessions: sessions });
+    set({ activeDomain: domain, jwtToken: jwt, userData: user, activeWorkspace: workspace, workspaceSessions: sessions });
   },
 
   clearSession: async () => {
@@ -96,7 +92,7 @@ export const useAppStore = create<AppState>((set) => ({
     await SecureStore.deleteItemAsync('workspace_sessions'); // Limpiar sesiones
     await SecureStore.deleteItemAsync('user_data');
     await SecureStore.deleteItemAsync('active_workspace');
-    set({ activeDomain: null, jwtToken: null, workspaceToken: null, workspaceSessions: null, userData: null, impersonatedWorkspace: null, activeWorkspace: null });
+    set({ activeDomain: null, jwtToken: null, workspaceSessions: null, userData: null, impersonatedWorkspace: null, activeWorkspace: null });
     router.replace('/(auth)/login');
   },
 

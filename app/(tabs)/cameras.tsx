@@ -14,7 +14,7 @@ import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
-import { getDevices, getWorkspacesDevices, getAlerts, getObjects, getMediaUrl, getWorkspacesEvents } from '../../services/api';
+import { getDevices, getWorkspacesDevices, getMediaUrl, getWorkspacesEvents } from '../../services/api';
 import { PROD_MEDIA_DOMAIN, WORKSPACES } from '../../constants/config';
 import Loading from '../../components/Loading';
 import { router } from 'expo-router';
@@ -79,9 +79,7 @@ export default function CamerasScreen() {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [streamStatus, setStreamStatus] = useState<Record<number, CameraStreamStatus>>({});
   const [cameraThumbnails, setCameraThumbnails] = useState<Record<number, string>>({});
-  const [_thumbnailFailures, setThumbnailFailures] = useState<Record<number, boolean>>({});
   const [thumbnailCameraId, setThumbnailCameraId] = useState<number | null>(null);
-  const webViewRef = useRef<WebView>(null);
 
   // Al abrir el modal de una cámara, seleccionamos por defecto WebRTC (WHEP)
   useEffect(() => {
@@ -268,22 +266,21 @@ export default function CamerasScreen() {
       .slice(0, 5);
   }, [objectsData, actionsData]);
 
-  function formatShortDate(d: string) {
-    if (!d) return '--';
-    return new Date(d).toLocaleString('es-PE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  }
 
-  function getStreamName(camera: Camera): string {
-    // Forzar el formato oficial del servidor ({id}-{deviceId}/1) para TODAS las cámaras
-    // Ignoramos campos antiguos de BD (stream_name, rtsp, rtsp2) que traen nombres desactualizados.
-    if (camera.id && camera.deviceId) {
+  function getStreamName(camera: Camera, isFrp: boolean = false): string {
+    if (isFrp) {
       const result = `${camera.id}-${camera.deviceId}/1`;
-      console.log(`[STREAM] getStreamName(${camera.name}): FORZADO = "${result}"`);
+      console.log(`[STREAM] getStreamName FRP(${camera.name}): "${result}"`);
       return result;
     }
-
-    const fallback = camera.deviceId || `camara${camera.id}`;
-    return fallback;
+    if (camera.name && camera.deviceId) {
+      const nameParts = camera.name.split('_');
+      const cleanName = nameParts.length > 1 ? nameParts.slice(1).join('_') : camera.name;
+      const result = `${cleanName}-${camera.deviceId}`;
+      console.log(`[STREAM] getStreamName PROD(${camera.name}): "${result}"`);
+      return result;
+    }
+    return camera.deviceId || `camara${camera.id}`;
   }
 
   /**
@@ -291,7 +288,6 @@ export default function CamerasScreen() {
    */
   function getHlsUrl(camera: Camera, cacheBust?: number): string {
     const suffix = cacheBust ? `?_cb=${cacheBust}` : '';
-    const streamName = getStreamName(camera);
 
     let effectiveDomain = domain;
     if ((currentWs?.id || '').toLowerCase() === 'realclub') {
@@ -305,29 +301,25 @@ export default function CamerasScreen() {
       const host = parts[0];
       const apiPort = parts[1];
 
-      // Si es a través del túnel FRP (IP, subdominio local o puertos del túnel 19090/29090/39090)
       if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
-        let hlsHttpsPort = '18891'; // default para túnel 1 (19090)
+        const streamName = getStreamName(camera, true);
+        let hlsHttpsPort = '18891';
         if (apiPort === '29090') hlsHttpsPort = '28891';
         else if (apiPort === '39090') hlsHttpsPort = '38891';
-
         return `https://local.imperium.pe:${hlsHttpsPort}/${streamName}/index.m3u8${suffix}`;
       }
 
-      // Si es conexión local o VPN directa
-      let hlsPort = '8888';
-      return `http://${host}:${hlsPort}/${streamName}/index.m3u8${suffix}`;
+      const streamName = getStreamName(camera, false);
+      return `http://${host}:8888/${streamName}/index.m3u8${suffix}`;
     }
 
+    const streamName = getStreamName(camera, false);
     return `https://${PROD_MEDIA_DOMAIN}:8888/${streamName}/index.m3u8${suffix}`;
   }
-
   /**
    * URL WHEP (WebRTC) — Apunta al servidor real en producción o al túnel FRP en entornos locales.
    */
   function getWebRtcUrl(camera: Camera): string {
-    const streamName = getStreamName(camera);
-
     let effectiveDomain = domain;
     if ((currentWs?.id || '').toLowerCase() === 'realclub') {
       const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
@@ -340,21 +332,20 @@ export default function CamerasScreen() {
       const host = parts[0];
       const apiPort = parts[1];
 
-      // Si es a través del túnel FRP (IP, subdominio local o puertos del túnel 19090/29090/39090)
       if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
-        let whepHtpsPort = '18890'; // default para túnel 1 (19090)
+        const streamName = getStreamName(camera, true);
+        let whepHtpsPort = '18890';
         if (apiPort === '29090') whepHtpsPort = '28890';
         else if (apiPort === '39090') whepHtpsPort = '38890';
-
         return `https://local.imperium.pe:${whepHtpsPort}/${streamName}/`;
       }
 
-      // Si es conexión local o VPN directa
-      let whepPort = '8889';
-      return `http://${host}:${whepPort}/${streamName}/`;
+      const streamName = getStreamName(camera, false);
+      return `http://${host}:8554/${streamName}/`;
     }
 
-    return `https://${PROD_MEDIA_DOMAIN}:8889/${streamName}/`;
+    const streamName = getStreamName(camera, false);
+    return `https://${PROD_MEDIA_DOMAIN}/webrtc/${streamName}/whep`;
   }
 
   function getCameraThumbnail(_camera: Camera) {
@@ -524,10 +515,6 @@ export default function CamerasScreen() {
     return false;
   }
 
-
-
-
-
   function getHlsHtml(camera: Camera) {
     const videoUrl = getHlsUrl(camera);
     return `
@@ -613,6 +600,99 @@ export default function CamerasScreen() {
       </body>
       </html>
     `;
+  }
+
+  function getWebRtcHtml(camera: Camera): string {
+    const whepUrl = getWebRtcUrl(camera);
+    const token = workspaceTokenForStream;
+    const authHeader = token ? `headers['Authorization'] = 'Bearer ${token}';` : '';
+
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+      <style>
+        html, body { margin: 0; padding: 0; background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+        video { width: 100vw; height: 100vh; object-fit: contain; }
+        #err { color: #ff4444; font-family: sans-serif; text-align: center; padding: 20px; display: none; position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); }
+      </style>
+    </head>
+    <body>
+      <video id="video" autoplay muted playsinline controls></video>
+      <div id="err"></div>
+      <script>
+        var video = document.getElementById('video');
+        var err = document.getElementById('err');
+
+        function post(payload) {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        }
+
+        async function startWhep() {
+          try {
+            var pc = new RTCPeerConnection({
+              iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            pc.ontrack = function(event) {
+              if (event.streams && event.streams[0]) {
+                video.srcObject = event.streams[0];
+                video.play().catch(function(){});
+                post({ type: 'stream_status', protocol: 'webrtc', state: 'connected' });
+              }
+            };
+
+            var offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            var headers = { 'Content-Type': 'application/sdp' };
+            ${authHeader}
+
+            var res = await fetch('${whepUrl}', {
+              method: 'POST',
+              headers: headers,
+              body: offer.sdp
+            });
+
+            if (!res.ok) {
+              throw new Error('WHEP error: ' + res.status);
+            }
+
+            var answerSdp = await res.text();
+            await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+          } catch(e) {
+            err.style.display = 'block';
+            err.innerText = 'WebRTC Error: ' + e.message;
+            post({ type: 'stream_status', protocol: 'webrtc', state: 'disconnected' });
+          }
+        }
+
+        startWhep();
+      </script>
+    </body>
+    </html>
+  `;
+  }
+
+  function isFrpConnection(): boolean {
+    let effectiveDomain = domain;
+    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
+      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
+      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    }
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
+    if (!isIpOrLocal || !effectiveDomain) return false;
+    const parts = effectiveDomain.split(':');
+    const host = parts[0];
+    const apiPort = parts[1];
+    return host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090';
   }
 
   if (loading) {
@@ -819,17 +899,9 @@ export default function CamerasScreen() {
                 }
 
                 if (evt.type === 'camera_thumbnail_failed') {
-                  setThumbnailFailures(prev => ({
-                    ...prev,
-                    [evt.cameraId]: true,
-                  }));
                   setThumbnailCameraId(null);
                 }
               } catch (e) {
-                setThumbnailFailures(prev => ({
-                  ...prev,
-                  [thumbnailCamera.id]: true,
-                }));
                 setThumbnailCameraId(null);
               }
             }}
@@ -889,10 +961,11 @@ export default function CamerasScreen() {
             <View style={styles.videoContainer}>
               <WebView
                 key={`stream-${selected.id}-${streamMode}`}
-                ref={webViewRef}
                 source={
                   streamMode === 'webrtc'
-                    ? { uri: `${getWebRtcUrl(selected)}?token=${workspaceTokenForStream}` }
+                    ? isFrpConnection()
+                      ? { uri: `${getWebRtcUrl(selected)}?token=${workspaceTokenForStream}` }
+                      : { html: getWebRtcHtml(selected), baseUrl: getWebViewBaseUrl() }
                     : { html: getHlsHtml(selected), baseUrl: getWebViewBaseUrl() }
                 }
                 style={styles.webview}
@@ -932,20 +1005,20 @@ export default function CamerasScreen() {
             }
             renderItem={({ item }) => {
               const urlImage = getMediaUrl(item.url_evidence || item.face_detected_url, domain);
-              
+
               let displayTime = '--:--:--';
               if (item.createdAt) {
                 try {
                   const date = new Date(item.createdAt);
                   displayTime = date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-                } catch (e) {}
+                } catch (e) { }
               }
 
               let vinfoObj: any = {};
               if (item.vinfo) {
                 try {
                   vinfoObj = typeof item.vinfo === 'string' ? JSON.parse(item.vinfo) : item.vinfo;
-                } catch (e) {}
+                } catch (e) { }
               }
 
               const alertName = (

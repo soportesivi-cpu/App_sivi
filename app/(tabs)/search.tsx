@@ -81,79 +81,49 @@ const CustomCalendar = React.memo(({ dateRange, setDateRange }: any) => {
 });
 
 const CustomTimePicker = React.memo(({ type, currentHour, currentMin, onSelect }: any) => {
-  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
-  const mins = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
-  
-  const hourScrollRef = React.useRef<ScrollView>(null);
-  const minScrollRef = React.useRef<ScrollView>(null);
+  const adjustTime = (unit: 'hour' | 'min', action: 'up' | 'down') => {
+    let currentVal = parseInt(unit === 'hour' ? currentHour : currentMin, 10);
+    const limit = unit === 'hour' ? 24 : 60;
+    const step = 1;
 
-  React.useEffect(() => {
-    // Solo al inicio para posicionar
-    const hIdx = hours.indexOf(currentHour);
-    const mIdx = mins.indexOf(currentMin);
-    setTimeout(() => {
-      if (hIdx !== -1) hourScrollRef.current?.scrollTo({ y: hIdx * 40, animated: false });
-      if (mIdx !== -1) minScrollRef.current?.scrollTo({ y: mIdx * 40, animated: false });
-    }, 100);
-  }, []);
-
-  const handleScrollEnd = (unit: 'hour' | 'min', event: any) => {
-    const y = event.nativeEvent.contentOffset.y;
-    const index = Math.round(y / 40);
-    const list = unit === 'hour' ? hours : mins;
-    if (index >= 0 && index < list.length) {
-      onSelect(type, unit, list[index]);
+    if (action === 'up') {
+      currentVal = (currentVal + step) % limit;
+    } else {
+      currentVal = (currentVal - step + limit) % limit;
     }
+
+    const newVal = currentVal.toString().padStart(2, '0');
+    onSelect(type, unit, newVal);
   };
 
   return (
-    <View style={styles.timeScrollerContainer}>
-      <Text style={styles.timeLabel}>{type === 'start' ? 'HORA INICIO' : 'HORA FIN'}</Text>
-      <View style={styles.pickerRow}>
-        <View style={styles.pickerScrollWrapper}>
-          <ScrollView 
-            ref={hourScrollRef}
-            style={styles.pickerScroll} 
-            showsVerticalScrollIndicator={false}
-            snapToInterval={40}
-            decelerationRate="fast"
-            onMomentumScrollEnd={(e) => handleScrollEnd('hour', e)}
-            onScrollEndDrag={(e) => handleScrollEnd('hour', e)}
-            contentContainerStyle={{ paddingVertical: 40 }}
-          >
-            {hours.map((h, idx) => (
-              <TouchableOpacity key={h} style={styles.pickerItem} onPress={() => {
-                onSelect(type, 'hour', h);
-                hourScrollRef.current?.scrollTo({ y: idx * 40, animated: true });
-              }}>
-                <Text style={[styles.pickerItemText, currentHour === h && styles.pickerItemActive]}>{h}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+    <View style={styles.timePickerRowCompact}>
+      <Text style={styles.timeLabelCompact}>
+        {type === 'start' ? 'HORA INICIO' : 'HORA FIN'}
+      </Text>
+      <View style={styles.timeSelectorGroup}>
+        {/* Selector de Horas */}
+        <View style={styles.timeUnitCol}>
+          <TouchableOpacity onPress={() => adjustTime('hour', 'up')} style={styles.arrowBtn}>
+            <Ionicons name="chevron-up" size={18} color="#2E9BFF" />
+          </TouchableOpacity>
+          <Text style={styles.timeValueText}>{currentHour}</Text>
+          <TouchableOpacity onPress={() => adjustTime('hour', 'down')} style={styles.arrowBtn}>
+            <Ionicons name="chevron-down" size={18} color="#2E9BFF" />
+          </TouchableOpacity>
         </View>
 
-        <Text style={styles.pickerSeparator}>:</Text>
+        <Text style={styles.timeColon}>:</Text>
 
-        <View style={styles.pickerScrollWrapper}>
-          <ScrollView 
-            ref={minScrollRef}
-            style={styles.pickerScroll} 
-            showsVerticalScrollIndicator={false}
-            snapToInterval={40}
-            decelerationRate="fast"
-            onMomentumScrollEnd={(e) => handleScrollEnd('min', e)}
-            onScrollEndDrag={(e) => handleScrollEnd('min', e)}
-            contentContainerStyle={{ paddingVertical: 40 }}
-          >
-            {mins.map((m, idx) => (
-              <TouchableOpacity key={m} style={styles.pickerItem} onPress={() => {
-                onSelect(type, 'min', m);
-                minScrollRef.current?.scrollTo({ y: idx * 40, animated: true });
-              }}>
-                <Text style={[styles.pickerItemText, currentMin === m && styles.pickerItemActive]}>{m}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+        {/* Selector de Minutos */}
+        <View style={styles.timeUnitCol}>
+          <TouchableOpacity onPress={() => adjustTime('min', 'up')} style={styles.arrowBtn}>
+            <Ionicons name="chevron-up" size={18} color="#2E9BFF" />
+          </TouchableOpacity>
+          <Text style={styles.timeValueText}>{currentMin}</Text>
+          <TouchableOpacity onPress={() => adjustTime('min', 'down')} style={styles.arrowBtn}>
+            <Ionicons name="chevron-down" size={18} color="#2E9BFF" />
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -428,10 +398,13 @@ const DetailMetaItem = ({ icon, label, value, highlight }: { icon: string; label
 );
 
 export default function SearchScreen() {
-  const { activeDomain: domain, workspaceSessions } = useAppStore();
-  const [selectedWorkspaces, setSelectedWorkspaces] = React.useState<string[]>(() => {
-    return workspaceSessions ? workspaceSessions.map((s: any) => s.workspace) : [];
-  });
+  const { activeDomain: domain, workspaceSessions, activeWorkspace, impersonatedWorkspace } = useAppStore();
+  const currentWs = impersonatedWorkspace || activeWorkspace;
+  const currentWsName = currentWs?.id || currentWs?.workspace || '';
+
+  const selectedWorkspaces = React.useMemo(() => {
+    return currentWsName ? [currentWsName] : [];
+  }, [currentWsName]);
   const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = React.useState('');
   
@@ -594,30 +567,7 @@ export default function SearchScreen() {
            </View>
         </View>
 
-        {/* WORKSPACE MULTI-SELECT BOX */}
-        {workspaceSessions && workspaceSessions.length > 1 && (
-          <TouchableOpacity 
-            style={styles.workspaceSelectorContainer}
-            onPress={() => setActiveModal('workspaces')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.filterLabel}>Sucursales a Buscar</Text>
-            <View style={styles.workspaceSelectorBox}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                <Ionicons name="business" size={18} color="#2E9BFF" />
-                <Text style={styles.workspaceSelectorValue} numberOfLines={1}>
-                  {selectedWorkspaces.length === 0 
-                    ? 'Ninguna sucursal seleccionada'
-                    : selectedWorkspaces.length === workspaceSessions.length
-                    ? 'Todas las sucursales'
-                    : `${selectedWorkspaces.length} de ${workspaceSessions.length} sucursales`
-                  }
-                </Text>
-              </View>
-              <Ionicons name="chevron-down" size={16} color="#2E9BFF" />
-            </View>
-          </TouchableOpacity>
-        )}
+        {/* Workspace selection removed. Restricting search to active workspace only */}
 
         {/* FILTER GRID */}
         <View style={styles.filterGrid}>
@@ -727,81 +677,7 @@ export default function SearchScreen() {
           />
         </SelectionModal>
 
-        <SelectionModal 
-          title="Seleccionar Sucursales" 
-          visible={activeModal === 'workspaces'} 
-          onClose={() => setActiveModal(null)}
-        >
-          {workspaceSessions && (
-            <>
-              {/* Opción Seleccionar Todas */}
-              <TouchableOpacity 
-                style={[
-                  styles.modalItem, 
-                  selectedWorkspaces.length === workspaceSessions.length && styles.modalItemActive
-                ]}
-                onPress={() => {
-                  if (selectedWorkspaces.length === workspaceSessions.length) {
-                    setSelectedWorkspaces([]);
-                  } else {
-                    setSelectedWorkspaces(workspaceSessions.map((s: any) => s.workspace));
-                  }
-                }}
-              >
-                <Text style={[
-                  styles.modalItemText, 
-                  selectedWorkspaces.length === workspaceSessions.length && styles.modalItemTextActive
-                ]}>Seleccionar Todas</Text>
-                <Switch
-                  value={selectedWorkspaces.length === workspaceSessions.length}
-                  onValueChange={() => {
-                    if (selectedWorkspaces.length === workspaceSessions.length) {
-                      setSelectedWorkspaces([]);
-                    } else {
-                      setSelectedWorkspaces(workspaceSessions.map((s: any) => s.workspace));
-                    }
-                  }}
-                  trackColor={{ false: '#333', true: '#2E9BFF' }}
-                  thumbColor="#fff"
-                />
-              </TouchableOpacity>
-              
-              <View style={{ height: 1, backgroundColor: '#ffffff05', marginVertical: 10 }} />
-
-              {/* Lista de Workspaces individuales */}
-              {workspaceSessions.map((s: any) => {
-                const isSelected = selectedWorkspaces.map(w => w.toLowerCase()).includes(s.workspace?.toLowerCase());
-                return (
-                  <TouchableOpacity 
-                    key={s.workspace} 
-                    style={[styles.modalItem, isSelected && styles.modalItemActive]}
-                    onPress={() => {
-                      if (isSelected) {
-                        setSelectedWorkspaces(selectedWorkspaces.filter(w => w.toLowerCase() !== s.workspace.toLowerCase()));
-                      } else {
-                        setSelectedWorkspaces([...selectedWorkspaces, s.workspace]);
-                      }
-                    }}
-                  >
-                     <Text style={[styles.modalItemText, isSelected && styles.modalItemTextActive]}>{s.workspace}</Text>
-                     <Switch
-                       value={isSelected}
-                       onValueChange={() => {
-                         if (isSelected) {
-                           setSelectedWorkspaces(selectedWorkspaces.filter(w => w.toLowerCase() !== s.workspace.toLowerCase()));
-                         } else {
-                           setSelectedWorkspaces([...selectedWorkspaces, s.workspace]);
-                         }
-                       }}
-                       trackColor={{ false: '#333', true: '#2E9BFF' }}
-                       thumbColor="#fff"
-                     />
-                  </TouchableOpacity>
-                );
-              })}
-            </>
-          )}
-        </SelectionModal>
+        {/* Workspace Selection Modal removed */}
 
         {/* PRIMARY ACTION */}
         <TouchableOpacity 
@@ -960,16 +836,54 @@ const styles = StyleSheet.create({
   dayText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   dayTextActive: { color: '#fff', fontWeight: '900' },
 
-  // Estilos de Time Picker
-  timeScrollerContainer: { paddingHorizontal: 20 },
-  timeLabel: { color: '#ffffff40', fontSize: 10, fontWeight: '900', letterSpacing: 1, marginBottom: 15 },
-  pickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 15 },
-  pickerScroll: { height: 120, width: 60 },
-  pickerScrollWrapper: { height: 120, width: 60, overflow: 'hidden' },
-  pickerItem: { height: 40, justifyContent: 'center', alignItems: 'center' },
-  pickerItemText: { color: '#ffffff40', fontSize: 20, fontWeight: '600' },
-  pickerItemActive: { color: '#2E9BFF', fontSize: 26, fontWeight: '900' },
-  pickerSeparator: { color: '#ffffff20', fontSize: 24, fontWeight: '900', marginTop: -5 },
+  // Estilos de Time Picker Compacto con Flechas
+  timePickerRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  timeLabelCompact: {
+    color: '#E0E0E0',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    flex: 1,
+  },
+  timeSelectorGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timeUnitCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A1C2C',
+    borderRadius: 10,
+    width: 48,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#ffffff10',
+  },
+  arrowBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  timeValueText: {
+    color: '#2E9BFF',
+    fontSize: 16,
+    fontWeight: '900',
+    marginVertical: 1,
+    fontFamily: 'monospace',
+  },
+  timeColon: {
+    color: '#ffffff40',
+    fontSize: 16,
+    fontWeight: '900',
+  },
 
   // Badge de sucursal en tarjetas
   workspaceBadge: { backgroundColor: '#2E9BFF15', borderColor: '#2E9BFF30', borderWidth: 0.5, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },

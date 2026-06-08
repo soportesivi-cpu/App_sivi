@@ -28,20 +28,5 @@ export const WORKSPACES: WorkspaceEntry[] = [
 export const PROD_API_DOMAIN = 'orchestrator.guardian.imperium.pe';
 
 /** Dominio de MediaMTX: HLS (:8888) y WebRTC WHEP (:8889) */
-export const PROD_MEDIA_DOMAIN = 'control.sivi.imperium.pe';
+export const PROD_MEDIA_DOMAIN = 'control.guardian.imperium.pe';
 
-// ─── Builder de URLs por entorno ─────────────────────────────────────────────
-
-export function buildUrls(domain: string) {
-  const isLocal = /^\d+\.\d+\.\d+\.\d+/.test(domain || '') || domain?.includes('localhost') || domain?.includes('.local') || domain?.includes(':');
-  const proto = isLocal ? 'http' : 'https';
-  const wsProto = isLocal ? 'ws' : 'wss';
-  return {
-    API_URL: `${proto}://${domain}/api/v1`,
-    HLS_URL: `${proto}://${domain}/hls`,
-    WS_URL: `${wsProto}://${domain}`,
-    BASE_URL: `${proto}://${domain}`,
-  };
-}
-
-export const ADMIN_EMAIL = 'info@ebenezertechs.com';

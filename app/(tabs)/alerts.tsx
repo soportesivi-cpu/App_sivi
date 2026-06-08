@@ -18,7 +18,7 @@ import { Alert as RNAlert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { useAppStore } from '../../services/store';
-import { getAlerts, getWorkspacesEvents, classifyWorkspacesEvent, getMediaUrl, parseUTCDate, confirmAlert, falsePositiveAlert, ignoreAlert, addIncidentDescription, getTrueAlertName, getDevices, getWorkspacesDevices } from '../../services/api';
+import { getWorkspacesEvents, classifyWorkspacesEvent, getMediaUrl, parseUTCDate, addIncidentDescription, getTrueAlertName, getWorkspacesDevices } from '../../services/api';
 import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
 import { playNotificationSound } from '../../services/sound';
@@ -120,6 +120,19 @@ function AlertCardItem({
     }
   }, [item.createdAt, item.id]);
 
+  const alarmName = useMemo(() => {
+    if (item.vinfo) {
+      try {
+        const vinfoObj = typeof item.vinfo === 'string' ? JSON.parse(item.vinfo) : item.vinfo;
+        const name = vinfoObj?.name || vinfoObj?.alarm_name || vinfoObj?.alarmName;
+        if (name && name.trim()) return name.trim();
+      } catch (e) {
+        // ignore
+      }
+    }
+    return item.motive_categorie || item.tag || 'Detección General';
+  }, [item.vinfo, item.motive_categorie, item.tag]);
+
   const typeTag = item.motive_categorie || item.tag || 'Detección General';
   const theme = getAnalyticTheme(typeTag);
 
@@ -157,7 +170,7 @@ function AlertCardItem({
 
         <View style={styles.gridCardFooter}>
           <Text style={styles.gridCardTitle} numberOfLines={1}>
-            {typeTag}
+            {alarmName}
           </Text>
           <View style={styles.gridCardLabelRow}>
             <Text style={styles.gridCardLabel}>PROB.</Text>
@@ -210,7 +223,7 @@ function AlertCardItem({
         <View style={styles.footerRow}>
           <View style={styles.footerInfo}>
             <Text style={[styles.cardTipo, { color: theme.color }]}>
-              <Ionicons name={theme.icon as any} size={14} /> {typeTag.toUpperCase()}
+              <Ionicons name={theme.icon as any} size={14} /> {alarmName.toUpperCase()}
             </Text>
             <Text style={styles.cardCam} numberOfLines={1}>
               {item.device?.name || item.deviceId || 'Cámara no especificada'}
@@ -237,10 +250,9 @@ function AlertCardItem({
 }
 
 export default function AlertsScreen() {
-  const { activeDomain: domain, jwtToken: token, isDarkMode, userData, workspaceSessions, activeWorkspace, impersonatedWorkspace } = useAppStore();
+  const { activeDomain: domain, isDarkMode, userData, workspaceSessions, activeWorkspace, impersonatedWorkspace } = useAppStore();
   const { alertId, createdAt } = useLocalSearchParams<{ alertId?: string; createdAt?: string }>();
   const currentWs = impersonatedWorkspace || activeWorkspace;
-  const isLocal = currentWs?.type === 'local';
 
   const activeSession = useMemo(() => {
     const wsId = currentWs?.id || currentWs?.workspace || '';
@@ -782,7 +794,6 @@ export default function AlertsScreen() {
       const gateClassification = action === 'CONFIRM' ? 'confirm' : action === 'FALSE_POSITIVE' ? 'false_positive' : 'ignore';
       console.log(`[API SYNC] 🚀 Clasificando alerta ID ${alertItem.id} — ${gateClassification}`);
       incidentRes = await classifyWorkspacesEvent({
-        sessions: activeSession,
         eventType: 'alert',
         eventId: alertItem.id,
         classification: gateClassification
@@ -1569,7 +1580,7 @@ const getStyles = (isDark: boolean) => {
     },
     gridCardTitle: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: 11,
       fontWeight: '800',
       marginBottom: 8,
     },
@@ -1636,7 +1647,7 @@ const getStyles = (isDark: boolean) => {
     footerInfo: { flex: 1 },
     footerMetrics: { alignItems: 'flex-end' },
 
-    cardTipo: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+    cardTipo: { fontSize: 10.5, fontWeight: '800', letterSpacing: 0.5 },
     cardCam: { color: textSecondary, fontSize: 14, fontWeight: '500', marginTop: 4 },
     cardHora: { color: textMuted, fontSize: 11, marginBottom: 2 },
     cardProb: { color: textPrimary, fontSize: 16, fontWeight: '800' },
