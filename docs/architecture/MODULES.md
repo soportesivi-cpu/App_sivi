@@ -11,12 +11,16 @@ graph TD
 
     Raiz(fa:fa-folder / AliceGuardianApp) ::: carpeta
     
-    %% Capa Visual
+    %% Capa Visual (Rutas)
     AppFolder(fa:fa-folder app/) ::: carpeta
-    AppFolder --> AuthRoute(fa:fa-file-code auth/) ::: archivo
-    AppFolder --> TabsRoute(fa:fa-file-code tabs/ - Dashboard) ::: archivo
-    AppFolder --> AdminRoute(fa:fa-file-code admin/ - SuperAdmin) ::: archivo
+    AppFolder --> AuthRoute(fa:fa-folder (auth)/) ::: carpeta
+    AppFolder --> TabsRoute(fa:fa-folder (tabs)/) ::: carpeta
     AppFolder --> Index(fa:fa-file-code index.tsx - Rutero Principal) ::: archivo
+
+    %% Capa Visual (Componentes Reutilizables)
+    ComponentsFolder(fa:fa-folder components/) ::: carpeta
+    ComponentsFolder --> AdminDash(fa:fa-file-code AdminDashboard.tsx) ::: archivo
+    ComponentsFolder --> SuperAdminDash(fa:fa-file-code SuperAdminDashboard.tsx) ::: archivo
 
     %% Capa Lógica
     ServicesFolder(fa:fa-folder services/) ::: carpeta
@@ -30,17 +34,19 @@ graph TD
 
     %% Relaciones Principales
     Raiz --> AppFolder
+    Raiz --> ComponentsFolder
     Raiz --> ServicesFolder
     Raiz --> ConstantsFolder
 
     %% Como se hablan entre ellos
     AuthRoute -.->|Llama a| Api
     AuthRoute -.->|Guarda en| Store
-    TabsRoute -.->|Llama a| Api
+    TabsRoute -.->|Renderiza Dashboard condicional de| ComponentsFolder
+    ComponentsFolder -.->|Llama a| Api
     Index -.->|Lee estado de| Store
 ```
 
 ### Regla de Oro (Muy fácil de entender):
-1. **Nada de lógica pesada en `app/`:** Las pantallas solo deben preocuparse por mostrar botones y textos bonitos.
+1. **Nada de lógica pesada en `app/` o `components/`:** Las pantallas y vistas solo deben preocuparse por mostrar botones, componentes y textos bonitos.
 2. **Las peticiones van en `services/api.ts`:** Si necesitas llamar a la base de datos externa, hazlo desde ahí.
-3. **Los datos que se comparten van en `services/store.ts`:** Si la pantalla A y la pantalla B necesitan saber qué cámara está seleccionada, guárdalo en Zustand (`store.ts`).
+3. **Los datos que se comparten van en `services/store.ts`:** Si la pantalla A y la pantalla B necesitan saber qué cámara está seleccionada o la sesión del usuario, guárdalo en Zustand (`store.ts`).

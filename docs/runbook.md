@@ -10,7 +10,7 @@ A veces instalas una librería nueva (`npm install algo`) pero la aplicación di
 1. Detén el servidor en la terminal (Ctrl + C).
 2. Vuelve a iniciarlo usando la bandera `-c` (clear):
 ```bash
-npm start -c
+npx expo start -c
 ```
 
 ## Problema 2: El simulador/celular se quedó congelado en una pantalla blanca
@@ -39,9 +39,10 @@ npm install
 La app dice "Network Request Failed" pero tu internet funciona bien.
 
 **Posibles causas:**
-1.  **Dominio Incorrecto:** Asegúrate de que el dominio asignado en tu `SecureStore` (o el que está por defecto en `constants/config.ts` -> `control.guardian.imperium.pe`) esté encendido y respondiendo.
+1.  **Dominio Incorrecto:** Asegúrate de que el dominio unificado de la API asignado en tu `SecureStore` (o el que está por defecto en `constants/config.ts` -> `PROD_API_DOMAIN = 'orchestrator.guardian.imperium.pe'`) esté encendido y respondiendo.
 2.  **CORS:** Si estás probando la app en Web (`npm run web`), es posible que el servidor rechace tu petición por seguridad. Trata de probar en un celular físico o emulador.
 
 ## Problema 5: Error al intentar crear un Build (APK / AAB)
 Si el comando `eas build` falla, normalmente el error detallado está al final de los logs en la plataforma web de Expo. 
-Asegúrate de que tus credenciales (como los archivos `.jks` que tienes en la raíz del proyecto) no hayan expirado y las contraseñas en Expo estén correctas.
+Asegúrate de que tus credenciales (como los archivos `.jks` que tienes en la raíz del proyecto, ej: `@soportesivi__AliceGuardianApp.jks`) no hayan expirado y las contraseñas en Expo estén correctas.
+

@@ -1,6 +1,6 @@
 # AliceGuardian App — Arquitectura de Conectividad
 > Documento de referencia para cualquier agente de IA o desarrollador que trabaje en este proyecto.
-> Última actualización: 2026-05-15
+> Última actualización: Junio 2026
 
 ---
 
@@ -9,107 +9,61 @@
 AliceGuardian es una app móvil (React Native + Expo Router) que se conecta a la plataforma **SIVI Imperium**. La conectividad tiene **tres capas independientes** con dominios y protocolos distintos.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      AliceGuardian App                      │
-├──────────────────┬────────────────────┬─────────────────────┤
-│   REST API       │   Socket.IO (WS)   │   Video Streaming   │
-│   (datos)        │   (tiempo real)    │   HLS / WebRTC      │
-├──────────────────┼────────────────────┼─────────────────────┤
-│ control.guardian │ control.guardian   │ control.sivi        │
-│ .imperium.pe     │ .imperium.pe       │ .imperium.pe        │
-│ puerto 443       │ puerto 443         │ puerto 8888 / 8889  │
-└──────────────────┴────────────────────┴─────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        AliceGuardian App                        │
+├────────────────────┬────────────────────┬───────────────────────┤
+│    REST API        │   Socket.IO (WS)   │    Video Streaming    │
+│    (datos)         │   (tiempo real)    │    HLS / WebRTC       │
+├────────────────────┼────────────────────┼───────────────────────┤
+│ orchestrator.      │ activeDomain o     │ control.guardian.     │
+│ guardian.          │ orchestrator.      │ imperium.pe           │
+│ imperium.pe        │ guardian.          │ puerto 8888 / 8889    │
+│ puerto 443         │ imperium.pe (443)  │ (o puertos locales)   │
+└────────────────────┴────────────────────┴───────────────────────┘
 ```
 
 ---
 
 ## 1. 🌐 REST API
 
-### Dominio
+### Dominio Principal (Orquestador API Gateway)
 ```
-https://control.guardian.imperium.pe/api/v1/
+https://orchestrator.guardian.imperium.pe
 ```
+Adicionalmente, se interactúa con las URLs de subdominios correspondientes a cada Workspace activo de producción configurado (ej. `https://control.guardian.imperium.pe`).
 
 ### Autenticación
-Todas las peticiones (excepto login) llevan el header:
-```
-Authorization: Bearer {jwtToken}
-```
-
-### Formato estándar de respuesta (listas)
+Las peticiones que consultan datos específicos de workspaces envían las credenciales o tokens de sesión resueltos a través de la pasarela API Gateway en un JSON body estructurado:
 ```json
 {
-  "count": 10,
-  "page": 1,
-  "pages": 1,
-  "limit": 30,
-  "rows": [ ... ]
+  "sessions": [
+    {
+      "workspace": "nombre_workspace",
+      "token": "token_workspace"
+    }
+  ]
 }
 ```
 
-### Endpoints confirmados en producción
+### Endpoints confirmados en producción (API Gateway)
 
 | Endpoint | Método | Descripción |
 |---|---|---|
-| `/api/v1/auth/login` | POST | Login. Devuelve `{ jwt, user }` |
-| `/api/v1/device/?page=1` | GET | Lista de cámaras/dispositivos |
-| `/api/v1/workspace` | GET | Lista de workspaces/managers registrados |
-| `/api/v1/alerts/?page=1` | GET | Alertas históricas |
-| `/api/v1/face/?page=1` | GET | Detecciones de rostros |
-| `/api/v1/object/?page=1` | GET | Detecciones de objetos |
-| `/api/v1/motion/?page=1` | GET | Detecciones de movimiento |
-
-> ⚠️ El prefijo `/mobile/` (`/api/v1/mobile/...`) **NO existe** en el servidor actual.
-> Usar siempre `/api/v1/` directamente.
-
-### Estructura real del objeto Dispositivo/Cámara
-```json
-{
-  "id": 666,
-  "name": "Bellavista_sala_de_reuniones_1",
-  "deviceId": "0438dafd-e297-48a6-8066-057cbda92af4",
-  "rtsp": "rtsp://control.sivi.imperium.pe:8554/sala_de_reuniones_1-0438dafd-e297-48a6-8066-057cbda92af4",
-  "stream_name": null,
-  "manager_id": "46a689d7-cbaf-427a-9fdb-f16641bcc4a9",
-  "type": "IP_CAM",
-  "state": "active"
-}
-```
-
-> 🔑 **El `stream_name` es null**. Extraer el nombre del stream desde el campo `rtsp`:
-> ```
-> rtsp://control.sivi.imperium.pe:8554/{STREAM_NAME}
-> ```
-> Función implementada en `cameras.tsx → getStreamName(camera)`.
-
-### Estructura real del objeto Workspace
-```json
-{
-  "id": 199,
-  "name": "movil",
-  "manager_id": "5a33d541-c5b7-459a-96d3-43700503ad35",
-  "computer": "sivi-S14AT",
-  "state": "active",
-  "type": "manager"
-}
-```
-
-> ⚠️ Los workspaces **NO tienen campo `domain`**. Todos comparten el mismo dominio API.
-> El `manager_id` es el filtro para diferenciar instalaciones.
-
-### Entorno de desarrollo (Mock)
-- Se usa **Mockoon** corriendo en `192.168.1.19:3001`
-- Sirve **solo REST API** con datos ficticios
-- Archivo: `mocks/sivi-mockoon.json`
-- Comando: `npm run mock`
+| `/mobile/auth/login` | POST | Login unificado. Devuelve sesión, workspaces asociados y tokens JWT. |
+| `/mobile/workspaces/summary` | POST | Estado de discos, cámaras y conteos del workspace. |
+| `/mobile/workspaces/devices` | POST | Obtiene la lista de cámaras/dispositivos por workspace. |
+| `/mobile/workspaces/events` | POST | Alertas y eventos históricos y en tiempo real (Smart Events). |
+| `/mobile/workspaces/alarms/configurations` | POST | Reglas de alarmas configuradas (con paginación exhaustiva). |
+| `/mobile/workspaces/events/classify` | POST | Clasificación de una alerta (Confirmar / Falso Positivo / Ignorar). |
+| `/mobile/workspaces/events/incidents/description` | POST | Agregar minutas/notas a incidentes de seguridad. |
 
 ---
 
 ## 2. 📡 Socket.IO (Tiempo Real)
 
-### Dominio (SIEMPRE el servidor real, incluso en modo mock)
+### Dominio
 ```
-wss://control.guardian.imperium.pe/socket.io/
+wss://{activeDomain}/socket.io/ (o wss://orchestrator.guardian.imperium.pe/socket.io/ por defecto)
 ```
 
 ### Configuración crítica
@@ -124,92 +78,56 @@ pingTimeout:  20000 ms
 socket.io-client@2.3.0  ← NO usar versiones 3.x o 4.x (incompatibles con EIO=3)
 ```
 
-### Handshake confirmado del servidor
-```
-GET /socket.io/?EIO=3&transport=polling → HTTP 200
-Respuesta: {"sid":"...","upgrades":["websocket"],"pingInterval":25000,"pingTimeout":20000}
-```
-
 ### Eventos que escucha la app (canales activos)
-| Evento | Descripción |
-|---|---|
-| `face` | Detección de rostro en tiempo real |
-| `lpr` | Lectura de placa vehicular |
-| `alert` | Alerta general (intrusión, movimiento) |
-| `event_motion` | Evento de movimiento detectado |
-| `statistics` | Estadísticas de la sesión |
+Multiplexado en los namespaces `/workspace-data`, `/workspace-lpr`, `/workspace-motion`, `/workspace-GUNS` según la configuración:
+| Evento / Canal | Namespace | Descripción |
+|---|---|---|
+| `face` | `/workspace-data` | Detección de rostros |
+| `lpr` | `/workspace-lpr` | Lectura de placa vehicular |
+| `alert` / `new_alert` | Todos | Alerta general de analítica (intrusión, movimiento) |
+| `event_motion` | `/workspace-motion` | Movimiento detectado en zona |
+| `GUNS` | `/workspace-GUNS` | Detección de armas u objetos peligrosos |
+| `alarm_stats` | `/workspace-data` | Métricas y estado global del Workspace |
 
-### Evento de autenticación (emit tras connect)
+### Handshake y Handlers de analítica
 ```javascript
+// Autenticar la sesión WebSocket en la conexión
 socket.emit('authenticate', { token: jwtToken });
-```
 
-### Eventos de analítica (para overlay en video)
-```javascript
-// Solicitar stream de analítica de una cámara
+// PASO CRÍTICO: Iniciar el streaming en el namespace para que el servidor comience a enviar eventos
 socket.emit('start_streaming', streamName);
-socket.emit('draw_streaming', 'object' | 'action');
-
-// Recibir cajas de detección (coordenadas 0.0–1.0 normalizadas)
-socket.on('draw_streaming', (payload) => { /* dibujar overlay */ });
-
-// Recibir frames MJPEG de la analítica
-socket.on('stream', (payload) => { /* payload.message = base64 JPEG */ });
 ```
-
-### Archivos relevantes
-- `services/websocket.ts` → clase `AlertSocketService` (singleton `wsService`)
-- `hooks/useSocket.ts` → hook de React para suscribirse a eventos
-- `app/_layout.tsx` → arranca/para el socket según el token JWT
 
 ---
 
 ## 3. 🎥 Video Streaming
 
-### Servidor de media (SIEMPRE el servidor real, incluso en modo mock)
+### Servidor de media (MediaMTX)
 ```
-MediaMTX corriendo en: control.sivi.imperium.pe
-RTSP fuente:  rtsp://control.sivi.imperium.pe:8554/{stream_name}
-HLS output:   https://control.sivi.imperium.pe:8888/{stream_name}/index.m3u8
-WHEP output:  https://control.sivi.imperium.pe:8889/{stream_name}/whep
+MediaMTX corriendo en: control.guardian.imperium.pe (PROD_MEDIA_DOMAIN)
+HLS output:   https://control.guardian.imperium.pe:8888/{stream_name}/index.m3u8
+WHEP output:  https://control.guardian.imperium.pe/webrtc/{stream_name}/whep
 ```
 
-> ⚠️ Los puertos 8888 y 8889 en `control.guardian.imperium.pe` devuelven **502**.
-> El video solo está disponible en `control.sivi.imperium.pe`.
-
-### Estrategia de reproducción (prioridad)
+### Estrategia de reproducción (alternancia manual)
 ```
-1. WebRTC WHEP   → latencia < 1 segundo  (preferido)
-2. HLS           → latencia 3–5 segundos  (fallback automático)
+1. WebRTC WHEP   → latencia < 1 segundo (preferido, por defecto)
+2. HLS           → latencia 3–5 segundos (alternativo en caso de restricciones de red)
 ```
 
 ### WebRTC WHEP — Flujo de negociación
 ```
-1. POST https://control.sivi.imperium.pe:8889/{stream_name}/whep
+1. POST https://control.guardian.imperium.pe/webrtc/{stream_name}/whep
    Headers: Content-Type: application/sdp
-            Authorization: Bearer {token}
+            Authorization: Bearer {workspaceToken}
    Body: SDP offer
 
-2. Respuesta: SDP answer (body) + Location header (URL para ICE patches)
-
-3. PATCH {Location URL}
-   Headers: Content-Type: application/trickle-ice-sdpfrag
-            Authorization: Bearer {token}
-   Body: a={iceCandidate}\r\n
-   (Repetir por cada candidato ICE descubierto)
-```
-
-### HLS — Estructura del manifiesto
-```
-GET https://control.sivi.imperium.pe:8888/{stream_name}/index.m3u8
-→ Playlist M3U8 → segmentos .ts (relativos a la URL base)
+2. Respuesta: SDP answer (body)
 ```
 
 ### Archivos relevantes
-- `constants/config.ts` → `PROD_MEDIA_DOMAIN = 'control.sivi.imperium.pe'`
-- `app/(tabs)/cameras.tsx` → `getStreamName()`, `getHlsUrl()`, `getWebRtcUrl()`
-- `hooks/useWhep.ts` → hook nativo de negociación WebRTC (requiere dev build)
-- HTML embebido en WebView dentro de `cameras.tsx` → player WebRTC + HLS + overlay analítica
+- `constants/config.ts` → `PROD_MEDIA_DOMAIN = 'control.guardian.imperium.pe'`
+- `app/(tabs)/cameras.tsx` → `getStreamName()`, `getHlsUrl()`, `getWebRtcUrl()` y HTML del reproductor inyectado.
 
 ---
 
@@ -217,21 +135,24 @@ GET https://control.sivi.imperium.pe:8888/{stream_name}/index.m3u8
 
 ```typescript
 // constants/config.ts
-PROD_API_DOMAIN   = 'control.guardian.imperium.pe'  // API + Socket.IO
-PROD_MEDIA_DOMAIN = 'control.sivi.imperium.pe'       // HLS + WebRTC
+PROD_API_DOMAIN   = 'orchestrator.guardian.imperium.pe'  // API principal / Gateway
+PROD_MEDIA_DOMAIN = 'control.guardian.imperium.pe'       // HLS + WebRTC WHEP
 
-// Mock local (solo REST API)
-WORKSPACES = [{ id: 'mock', domain: '192.168.1.19:3001' }]
+// Workspaces registrados
+WORKSPACES = [
+  { id: 'control', name: 'Imperium Control', domain: 'control.guardian.imperium.pe', ... },
+  { id: 'cmarket', name: 'Imperium Cmarket', domain: 'cmarket.guardian.imperium.pe', ... },
+  ...
+]
 ```
 
 ---
 
 ## 5. 🔑 JWT Token
 
-- Se obtiene del endpoint `POST /api/v1/auth/login` → campo `jwt` en la respuesta
+- Se obtiene del endpoint unificado `POST /mobile/auth/login`
 - Se almacena en `expo-secure-store` bajo la clave `jwt_token`
-- Accesible globalmente via `useAppStore.getState().jwtToken`
-- El token actual de prueba tiene solo claim `iat` (sin roles/userId) — es un token mínimo de desarrollo
+- Las credenciales de workspaces adicionales y sesiones se persisten también en `workspace_sessions` y `active_workspace` para aislamiento de datos.
 
 ---
 
@@ -239,23 +160,23 @@ WORKSPACES = [{ id: 'mock', domain: '192.168.1.19:3001' }]
 
 ```
 services/
-  api.ts          → fetchAPI(), getDevices(), getAlerts(), etc.
-  store.ts        → Zustand store (jwtToken, activeDomain, userData)
-  websocket.ts    → AlertSocketService singleton (wsService)
-
-hooks/
-  useSocket.ts    → Hook React para suscripción a eventos en tiempo real
-  useWhep.ts      → Hook nativo para negociación WebRTC/WHEP
+  api.ts          → getDashboard(), getWorkspacesDevices(), getWorkspacesEvents(), getAlarms()
+  store.ts        → Zustand store (jwtToken, activeDomain, userData, activeWorkspace, workspaceSessions)
+  websocket.ts    → AlertSocketService singleton (wsService) para namespaces multiplexados
 
 constants/
-  config.ts       → Dominios de producción, WORKSPACES, buildUrls()
+  config.ts       → Dominios de producción, WORKSPACES
 
 app/
-  _layout.tsx     → Boot del socket al detectar token
+  _layout.tsx     → Boot del ciclo de vida del socket al hidratar token y dominio
+  index.tsx       → Guardia de tráfico de entrada (auth frente a tabs)
   (tabs)/
-    cameras.tsx   → Stream de video + analítica overlay
-    alerts.tsx    → Alertas históricas + tiempo real
-
-mocks/
-  sivi-mockoon.json → Mockoon config (solo REST API ficticia)
+    dashboard.tsx → Enrutador condicional de dashboards
+    cameras.tsx   → Grid de cámaras y WebView player
+    alerts.tsx    → Gestión forense de alertas con scroll infinito y acciones de confirmación
+    events.tsx    → Configuración y reglas de eventos
+    settings.tsx  → Ajustes de perfil, sucursal activa y cierre de sesión seguro
+    event-config.tsx → Configuración detallada de alarma y región de interés (ROI) interactiva con SVG
 ```
+
+

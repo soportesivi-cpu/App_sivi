@@ -1,80 +1,99 @@
-# AliceGuardian — Especificación API Móvil
-## `https://control.guardian.imperium.pe/api/v1/mobile/`
+# SIVI Imperium — Especificación de API Gateway Móvil
+## `https://orchestrator.guardian.imperium.pe/mobile/`
 
-Documento para el equipo de backend. Todos los endpoints que la app móvil necesita.
+Este documento describe la especificación técnica de la API consumida por el cliente móvil. A diferencia de una REST API tradicional basada en verbos GET, la comunicación con el móvil se realiza a través de un **Gateway Consolidador** (Orquestador) mediante peticiones `POST` que aíslan y gestionan la multi-sesión de workspaces en el cuerpo del mensaje.
 
 ---
 
 ## Reglas Generales
 
-- **Base URL:** `https://control.guardian.imperium.pe/api/v1/mobile/`
-- **Auth:** Header `Authorization: Bearer {jwt}` en todos los endpoints (excepto login)
-- **Formato listas:** Siempre `{ count, page, pages, limit, rows: [...] }`
-- **Formato error:** `{ error: "mensaje" }` con código HTTP apropiado (401, 403, 404, 500)
+- **Base URL:** `https://orchestrator.guardian.imperium.pe`
+- **Método de Red:** Todas las peticiones al Gateway (excepto login) se realizan mediante **`POST`** con cabecera `Content-Type: application/json`.
+- **Aislamiento de Datos (Multi-sesión):** El cuerpo de cada petición al Gateway debe incluir las credenciales resueltas del o los workspaces consultados:
+  ```json
+  {
+    "sessions": [
+      {
+        "workspace": "nombre_workspace",
+        "token": "token_especifico_del_workspace"
+      }
+    ],
+    ...filtros
+  }
+  ```
+- **Formato estándar de respuestas:**
+  * Respuestas exitosas: `{ workspaces: [ { workspace: "id", ...datos } ] }` o `{ count, rows: [...] }` dependiendo del endpoint.
+  * Respuestas de error: Mensaje plano con código HTTP apropiado (400, 401, 403, 404, 500).
 
 ---
 
-## 1. 🔐 Autenticación
+## 1. 🔐 Autenticación Móvil Unificada
 
-### POST `/api/v1/auth/login`
-> *(Este ya existe y funciona — no cambiar)*
+### POST `/mobile/auth/login`
+Autentica al usuario en el sistema y retorna sus credenciales, roles y la lista de todos los workspaces a los que tiene acceso junto con sus respectivos tokens locales.
 
 **Body:**
 ```json
-{ "email": "string", "password": "string" }
+{
+  "email": "string",
+  "password": "string"
+}
 ```
-**Respuesta:**
+
+**Respuesta Exitosa (HTTP 200):**
 ```json
 {
-  "jwt": "eyJ...",
-  "user": {
-    "id": "string",
-    "name": "string",
-    "email": "string",
-    "avatar_url": "string | null",
-    "role": { "name": "SuperAdmin | Admin | Operator" }
-  }
+  "results": [
+    {
+      "workspace": "cmarket",
+      "token": "token_lpr_alarms_workspace",
+      "jwt": "eyJ...",
+      "user": {
+        "id": 15,
+        "Username": "jorge_admin",
+        "Email": "admin@cmarket.pe",
+        "role": {
+          "id": 1,
+          "name": "Admin"
+        }
+      }
+    }
+  ]
 }
 ```
 
 ---
 
-## 2. 📊 Dashboard
+## 2. 📊 Métricas y Dashboard
 
-### GET `/api/v1/mobile/dashboard`
+### POST `/mobile/workspaces/alerts/dashboard`
+Obtiene las métricas agregadas operacionales para el dashboard móvil en un rango temporal específico.
 
-**Query params opcionales:**
-- `?manager_id=UUID` — filtrar por instalación específica (para SuperAdmin)
-
-**Respuesta esperada:**
+**Body:**
 ```json
 {
-  "summary": {
-    "cameras": { "on": 10, "off": 2 },
-    "storage":  { "percent": 75, "days": 15 }
-  },
-  "alerts24h": {
-    "face":      45,
-    "lpr":       30,
-    "object":    12,
-    "intrusion":  3
-  },
-  "metrics": {
-    "total":      90,
-    "resolved":   85,
-    "unresolved":  5,
-    "effective":  "94.4%"
-  },
-  "recentAlerts": [
+  "sessions": [ ... ],
+  "timePreset": "custom | hoy | ayer | semana | 15dias | 30dias",
+  "timezone": "America/Lima",
+  "from": "ISO Date String",
+  "to": "ISO Date String"
+}
+```
+
+**Respuesta Exitosa:**
+```json
+{
+  "workspaces": [
     {
-      "id":      "string",
-      "title":   "Intrusión Perímetro Sur",
-      "time":    "14:32:05",
-      "camera":  "CAM-EXT-04",
-      "percent": "98%",
-      "type":    "error | primary | secondary | tertiary",
-      "icon":    "walk-outline",
-      "img":     "https://... | null"
+      "workspace": "cmarket",
+      "charts": {
+        "totalAlerts": { "total": 90, "slices": [ { "key": "lpr", "value": 30 } ] },
+        "attendedAlerts": { "total": 85 },
+        "unresolvedAlerts": { "total": 5 },
+        "effectiveOperationPercentage": { "total_alerts": 90, "attended_total": 85 },
+        "classifiedAlerts": { "slices": [ { "key": "positive", "value": 60 } ] },
+        "operatorActionTime": { "averageSeconds": 14760, "bestSeconds": 9360 }
+      }
     }
   ]
 }
@@ -84,73 +103,86 @@ Documento para el equipo de backend. Todos los endpoints que la app móvil neces
 
 ## 3. 📷 Dispositivos / Cámaras
 
-### GET `/api/v1/mobile/devices`
+### POST `/mobile/workspaces/devices`
+Retorna el listado de cámaras activas del workspace, incluyendo el estado RTSP.
 
-**Query params:**
-- `?page=1`
-- `?manager_id=UUID` — filtrar por instalación
-
-**Respuesta:**
+**Body:**
 ```json
 {
-  "count": 10,
-  "page": 1,
-  "pages": 1,
-  "limit": 30,
-  "rows": [
+  "sessions": [ ... ]
+}
+```
+
+**Respuesta Exitosa:**
+```json
+{
+  "workspaces": [
     {
-      "id":         666,
-      "name":       "Bellavista_sala_de_reuniones_1",
-      "deviceId":   "0438dafd-e297-48a6-8066-057cbda92af4",
-      "stream_name":"sala_de_reuniones_1-0438dafd-e297-48a6-8066-057cbda92af4",
-      "rtsp":       "rtsp://control.sivi.imperium.pe:8554/sala_de_reuniones_1-0438dafd-...",
-      "manager_id": "UUID",
-      "type":       "IP_CAM",
-      "state":      "active | inactive",
-      "hasMotion":  false,
-      "latitude":   null,
-      "longitude":  null
+      "workspace": "cmarket",
+      "devices": [
+        {
+          "id": 666,
+          "name": "Bellavista_sala_de_reuniones_1",
+          "deviceId": "0438dafd-e297-48a6-8066-057cbda92af4",
+          "rtsp": "rtsp://63.141.255.156:8554/sala_de_reuniones_1",
+          "type": "IP_CAM",
+          "state": "active",
+          "rtspStatus": {
+            "primary": "online | offline | unknown",
+            "secondary": "online | offline | unknown"
+          },
+          "recording": {
+            "configured": true,
+            "active": true
+          }
+        }
+      ]
     }
   ]
 }
 ```
 
-> ⚠️ **Campo crítico:** `stream_name` debe venir poblado siempre.
-> La app lo necesita para construir las URLs de video:
-> - HLS:  `https://control.sivi.imperium.pe:8888/{stream_name}/index.m3u8`
-> - WHEP: `https://control.sivi.imperium.pe:8889/{stream_name}/whep`
-
 ---
 
-## 4. 🚨 Alertas
+## 4. 🚨 Historial de Eventos y Alertas
 
-### GET `/api/v1/mobile/alerts`
+### POST `/mobile/workspaces/events`
+Obtiene las alertas procesadas e imágenes de evidencia en base al rango de tiempo e instalacion.
 
-**Query params:**
-- `?page=1`
-- `?manager_id=UUID`
-- `?type=face|lpr|object|intrusion` — filtro por tipo
-- `?device_id=UUID` — filtro por cámara
+**Body:**
+```json
+{
+  "sessions": [ ... ],
+  "eventType": "alert | smart_event",
+  "from": "ISO Date String (from)",
+  "to": "ISO Date String (to)",
+  "timezone": "America/Lima",
+  "page": 1,
+  "limit": 30,
+  "filters": {
+    "deviceId": "string | null"
+  }
+}
+```
 
-**Respuesta:**
+**Respuesta: (Formato Paginado)**
 ```json
 {
   "count": 100,
-  "page": 1,
-  "pages": 4,
-  "limit": 30,
   "rows": [
     {
-      "id":        "string",
-      "type":      "face | lpr | object | intrusion | motion",
-      "title":     "Rostro Detectado",
-      "probability": 0.98,
+      "id": 1492,
+      "tag": "lpr | face | intrusion | motion",
+      "probability": "0.98",
+      "url_evidence": "capturas/cmarket_evidencia.jpg",
+      "face_detected_url": "rostros/cmarket_rostro.jpg",
       "createdAt": "2026-05-15T14:32:05.000Z",
-      "image_url": "https://... | null",
-      "deviceId":  "UUID",
+      "is_confirmed": true,
+      "is_fp": false,
+      "state": "resolved",
+      "vinfo": "{\"name\":\"Alarma 1\",\"schedule\":\"08:00 - 18:00\"}",
       "device": {
-        "name":    "Cámara Entrada",
-        "manager_id": "UUID"
+        "name": "Cámara Entrada"
       }
     }
   ]
@@ -159,31 +191,38 @@ Documento para el equipo de backend. Todos los endpoints que la app móvil neces
 
 ---
 
-## 5. 👤 Rostros (Face Recognition)
+## 5. ⚙️ Configuraciones de Reglas de Eventos
 
-### GET `/api/v1/mobile/faces`
+### POST `/mobile/workspaces/alarms/configurations`
+Mapea las analíticas e inteligencia artificial configuradas en las cámaras del workspace.
 
-**Query params:**
-- `?page=1`
-- `?manager_id=UUID`
-- `?device_id=UUID`
-
-**Respuesta:**
+**Body:**
 ```json
 {
-  "count": 50,
+  "sessions": [ ... ],
   "page": 1,
-  "pages": 2,
-  "limit": 30,
-  "rows": [
+  "limit": 100
+}
+```
+
+**Respuesta Exitosa:**
+```json
+{
+  "workspaces": [
     {
-      "id":          "string",
-      "probability": 0.97,
-      "label":       "Autorizado | Desconocido | string",
-      "image_url":   "https://...",
-      "createdAt":   "2026-05-15T14:32:05.000Z",
-      "deviceId":    "UUID",
-      "device":      { "name": "string" }
+      "workspace": "cmarket",
+      "configurations": {
+        "count": 15,
+        "rows": [
+          {
+            "id": 23,
+            "name": "INGRESO_CASTAÑOS_Aforo",
+            "state": true,
+            "Detail_device_alarm": [ { "id": 1 } ],
+            "Detail_rule_obj_alarm": [ { "tag": "person", "alertime": 2.0, "prob": 75 } ]
+          }
+        ]
+      }
     }
   ]
 }
@@ -191,30 +230,56 @@ Documento para el equipo de backend. Todos los endpoints que la app móvil neces
 
 ---
 
-## 6. 🚗 LPR (Placas)
+### POST `/mobile/workspaces/alarms/configurations/detail`
+Obtiene los detalles completos y las analíticas de una regla de alarma específica.
 
-### GET `/api/v1/mobile/lpr`
-
-**Query params:**
-- `?page=1`
-- `?manager_id=UUID`
-
-**Respuesta:**
+**Body:**
 ```json
 {
-  "count": 30,
-  "page": 1,
-  "pages": 1,
-  "limit": 30,
-  "rows": [
+  "sessions": [ ... ],
+  "alarmId": 23
+}
+```
+
+**Respuesta Exitosa:**
+```json
+{
+  "workspaces": [
     {
-      "id":        "string",
-      "plate":     "ABC-123",
-      "authorized": true,
-      "image_url": "https://...",
-      "createdAt": "2026-05-15T14:32:05.000Z",
-      "deviceId":  "UUID",
-      "device":    { "name": "string" }
+      "workspace": "cmarket",
+      "alarm": {
+        "id": 23,
+        "name": "INGRESO_CASTAÑOS_Aforo",
+        "state": true,
+        "sound": 1,
+        "frequency": 3,
+        "cooldown": 10,
+        "Detail_device_alarm": [ ... ],
+        "Detail_rule_obj_alarm": [ ... ],
+        "Detail_rule_face__alarm": [ ... ],
+        "Detail_rule_lpr__alarm": [ ... ],
+        "Detail_rule_action_alarm": [ ... ],
+        "actions": [
+          {
+            "id": 12,
+            "issound": true,
+            "isalert": true,
+            "ismodal": true,
+            "manual_confirmation": false,
+            "timeout": 30,
+            "iswhatsapp": false,
+            "isemail": false,
+            "notifiable": true
+          }
+        ],
+        "roi": [
+          {
+            "id": 4,
+            "state": true,
+            "points": "[[0.25,0.25],[0.75,0.25],[0.75,0.75],[0.25,0.75]]"
+          }
+        ]
+      }
     }
   ]
 }
@@ -222,88 +287,117 @@ Documento para el equipo de backend. Todos los endpoints que la app móvil neces
 
 ---
 
-## 7. 🏢 Workspaces (para SuperAdmin)
+### POST `/mobile/workspaces/alarms/configurations/update`
+Actualiza el estado general, sonido, frecuencia, y las acciones de una configuración de alarma.
 
-### GET `/api/v1/mobile/workspaces`
-
-> *(Equivalente a `/api/v1/workspace` pero con más info)*
-
-**Respuesta:**
+**Body:**
 ```json
 {
-  "count": 10,
-  "page": 1,
-  "pages": 1,
-  "limit": 30,
-  "rows": [
+  "sessions": [ ... ],
+  "alarmId": 23,
+  "alarm": {
+    "state": true,
+    "sound": 1,
+    "frequency": 3
+  },
+  "action": {
+    "id": 12,
+    "issound": true,
+    "isalert": true,
+    "ismodal": true,
+    "manual_confirmation": false,
+    "timeout": 30
+  }
+}
+```
+
+**Respuesta Exitosa:**
+```json
+{
+  "success": true,
+  "message": "Configuración de alarma actualizada con éxito"
+}
+```
+
+---
+
+### POST `/mobile/workspaces/alarms/configurations/polygons/update`
+Actualiza las coordenadas de la Región de Interés (ROI) de los polígonos asociados a la alarma.
+
+**Body:**
+```json
+{
+  "sessions": [ ... ],
+  "polygons": [
     {
-      "id":          1,
-      "name":        "Bellavista",
-      "manager_id":  "UUID",
-      "computer":    "sivi-server-01",
-      "state":       "active | inactive",
-      "type":        "manager | local",
-      "cameras_count": 12,
-      "users_count":   5,
-      "plan":        "PRO | LITE | ENT",
-      "createdAt":   "2026-05-15T00:00:00.000Z"
+      "roiId": 4,
+      "state": true,
+      "points": "[[0.2,0.2],[0.8,0.2],[0.8,0.8],[0.2,0.8]]"
     }
   ]
 }
 ```
 
-> ⚠️ **Campos nuevos necesarios:** `cameras_count`, `users_count`, `plan`
-> La pantalla SuperAdmin los muestra como "Cámaras: 128", "Usuarios: 45".
-
----
-
-## 8. 🔍 Búsqueda Forense
-
-### GET `/api/v1/mobile/search`
-
-**Query params (todos opcionales, al menos uno requerido):**
-- `?type=face|lpr|object|motion`
-- `?date_from=2026-05-15T00:00:00`
-- `?date_to=2026-05-15T23:59:59`
-- `?device_id=UUID`
-- `?manager_id=UUID`
-- `?page=1`
-
-**Respuesta:** mismo formato estándar con `rows`.
-
----
-
-## 9. 📈 Estadísticas en Vivo
-
-### GET `/api/v1/mobile/stats`
-
-**Query params:**
-- `?manager_id=UUID`
-- `?range=24h|7d|30d`
-
-**Respuesta:**
+**Respuesta Exitosa:**
 ```json
 {
-  "range": "24h",
-  "data": [
-    { "hour": "00:00", "face": 5, "lpr": 3, "object": 1 },
-    { "hour": "01:00", "face": 2, "lpr": 1, "object": 0 }
-  ]
+  "success": true,
+  "message": "Polígonos de ROI actualizados con éxito"
 }
 ```
 
+
 ---
 
-## Resumen de Endpoints
+## 6. 🔍 Búsqueda Forense Inteligente
 
-| Método | Endpoint | Descripción |
-|---|---|---|
-| POST | `/api/v1/auth/login` | Login (ya existe) |
-| GET | `/api/v1/mobile/dashboard` | Dashboard con resumen |
-| GET | `/api/v1/mobile/devices` | Lista de cámaras |
-| GET | `/api/v1/mobile/alerts` | Historial de alertas |
-| GET | `/api/v1/mobile/faces` | Detecciones de rostros |
-| GET | `/api/v1/mobile/lpr` | Lecturas de placas |
-| GET | `/api/v1/mobile/workspaces` | Lista de instalaciones (SuperAdmin) |
-| GET | `/api/v1/mobile/search` | Búsqueda forense |
-| GET | `/api/v1/mobile/stats` | Estadísticas por rango |
+### POST `/mobile/workspaces/search`
+Realiza filtros avanzados en todas las colecciones de metadatos (Placas, Rostros, Objetos).
+
+**Body:**
+```json
+{
+  "sessions": [ ... ],
+  "tag": "face | lpr | object | intrusion",
+  "timePreset": "custom",
+  "from": "ISO Date String",
+  "to": "ISO Date String",
+  "deviceId": "string | null",
+  "page": 1,
+  "limit": 30
+}
+```
+
+**Respuesta:** mismo formato estandar con `rows`.
+
+---
+
+## 7. 🚨 Acciones de Gestión y Clasificación de Seguridad
+
+### POST `/mobile/workspaces/events/classification`
+Clasifica una alerta recibida (Confirmada, Falso Positivo o Ignorada).
+
+**Body:**
+```json
+{
+  "sessions": [ ... ],
+  "eventType": "alert",
+  "eventId": 1492,
+  "classification": "confirm | false_positive | ignore"
+}
+```
+
+### POST `/mobile/workspaces/events/description`
+Agrega una nota visual/minuta sobre el incidente.
+
+**Body:**
+```json
+{
+  "sessions": [ ... ],
+  "eventId": 1492,
+  "incidentId": 23091,
+  "name": "Manual Confirmation",
+  "description": "El operador observó ingreso autorizado por portón principal."
+}
+```
+

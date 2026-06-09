@@ -33,7 +33,7 @@ C4Container
         Container(secure, "Almacenamiento Seguro", "Expo SecureStore", "Guarda el JWT Token y el Dominio encriptados en el celular.")
     }
 
-    System_Ext(api, "API Sivi Backend", "control.guardian.imperium.pe")
+    System_Ext(api, "API Sivi Backend", "orchestrator.guardian.imperium.pe")
 
     Rel(ui, state, "Lee y actualiza estado")
     Rel(ui, fetching, "Pide datos (Hooks)")

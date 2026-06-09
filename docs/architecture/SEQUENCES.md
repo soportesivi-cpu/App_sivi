@@ -17,32 +17,28 @@ sequenceDiagram
     participant Secure as SecureStore (Teléfono)
     participant Router as Expo Router
 
-    Usuario->>UI: Ingresa Email, Contraseña y presiona "Ingresar"
+    Usuario->>UI: Ingresa Email, Contraseña y presiona "LOGIN"
     UI->>APIClient: autoLogin(email, password)
     
     rect rgb(230, 240, 255)
-        Note right of APIClient: Prueba conectar con el Dominio Configurado
-        APIClient->>API: POST /api/v1/auth/login
-        API-->>APIClient: Retorna { jwt, userData }
+        Note right of APIClient: Conecta a la pasarela de login consolidada
+        APIClient->>API: POST /mobile/auth/login
+        API-->>APIClient: Retorna datos del usuario y workspaces vinculados
     end
 
-    APIClient-->>UI: Retorna datos de sesión
+    APIClient-->>UI: Retorna { workspace, data: { token, jwt, user, sessions } }
     
-    UI->>Store: setSession(domain, jwt, userData)
+    UI->>Store: setSession(domain, token, jwt, user, workspace, sessions)
     
     rect rgb(230, 255, 230)
-        Note right of Store: Guarda en el teléfono para persistencia
-        Store->>Secure: Guardar en disco (token, dominio)
+        Note right of Store: Guarda en el almacenamiento seguro del dispositivo
+        Store->>Secure: Guardar en disco (dominio, tokens, user, workspace, sesiones)
     end
     
-    Store-->>UI: Estado actualizado
+    Store-->>UI: Estado actualizado (jwtToken y activeDomain establecidos)
 
-    Note over UI, Router: El archivo index.tsx detecta el cambio
-    alt Es SuperAdmin
-        UI->>Router: Redirige a /(admin)/workspaces
-    else Es Usuario Normal
-        UI->>Router: Redirige a /(tabs)/dashboard
-    end
+    UI->>Router: Redirige a /(tabs)/dashboard
+    Note over Router: En (tabs)/dashboard, se renderiza condicionalmente el dashboard adecuado (SuperAdmin o Admin regular) según el rol del usuario.
 ```
 
 ## 2. Flujo de Hidratación (Abrir la App)
@@ -56,17 +52,24 @@ sequenceDiagram
     participant Layout as _layout.tsx (Inicio)
     participant Store as Estado Global (Zustand)
     participant Secure as SecureStore (Teléfono)
+    participant Index as index.tsx (Rutero Inicial)
     participant Router as Expo Router
 
     Usuario->>Layout: Abre la aplicación
     Layout->>Store: hydrate()
     
-    Store->>Secure: ¿Hay sesión guardada?
-    Secure-->>Store: Sí (Devuelve Token y Dominio)
+    rect rgb(230, 240, 255)
+        Note right of Store: Lee la sesión guardada del teléfono
+        Store->>Secure: Cargar active_domain, jwt_token, user_data, etc.
+        Secure-->>Store: Retorna datos guardados
+    end
     
     Store-->>Layout: isHydrated = true
-    Layout->>Router: Muestra index.tsx
+    Layout->>Index: Renderiza componente index.tsx
     
-    Note right of Router: Como el Store tiene Token...
-    Router-->>Usuario: Redirige directo al Dashboard
+    alt jwtToken no está vacío (Sesión activa)
+        Index->>Router: Redirige a /(tabs)/dashboard
+    else jwtToken está vacío (Sin sesión)
+        Index->>Router: Redirige a /(auth)/login
+    end
 ```

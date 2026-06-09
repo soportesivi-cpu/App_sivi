@@ -23,7 +23,7 @@
     "android": {
       "versionCode": 3,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon-sisvi.png",
+        "foregroundImage": "./assets/icon-sivi-adaptive.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": false,

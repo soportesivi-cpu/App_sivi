@@ -10,7 +10,8 @@ Sabemos que el primer día en un proyecto nuevo puede ser abrumador. Esta guía 
 Asegúrate de tener instalado en tu computadora:
 *   [Node.js](https://nodejs.org/en) (Usa la versión LTS recomendada).
 *   Un editor de código (Recomendamos **Visual Studio Code**).
-*   En tu celular (Android o iOS), descarga la aplicación **Expo Go** desde tu tienda de aplicaciones.
+*   Un emulador de Android (Android Studio) o simulador de iOS (Xcode en Mac), o bien un dispositivo físico conectado por USB con la depuración USB activada.
+*   **Nota importante:** Debido a que el proyecto incluye dependencias nativas personalizadas (como `react-native-webrtc` para la transmisión de video), la aplicación **no es compatible con la app estándar Expo Go**. Se requiere construir y ejecutar un cliente de desarrollo local.
 
 ### 2. Levantar el proyecto
 Abre tu terminal, ve a la carpeta donde quieres guardar el proyecto y ejecuta:
@@ -23,16 +24,17 @@ cd AliceGuardianApp
 # 2. Instala las dependencias (librerías)
 npm install
 
-# 3. Inicia el servidor local
-npm start
+# 3. Compila y ejecuta en Android (requiere emulador abierto o celular por USB)
+npm run android
+
+# O si estás en Mac para iOS:
+npm run ios
 ```
 
 ### 3. ¡Ver la magia!
-Al ejecutar `npm start`, verás un código QR en tu terminal. 
-*   **Si tienes iPhone:** Abre la cámara de tu iPhone y escanea el código. Toca la notificación que aparece.
-*   **Si tienes Android:** Abre la app **Expo Go** que descargaste y selecciona "Scan QR Code".
+Al ejecutar el comando de compilación nativa (`npm run android` o `npm run ios`), se abrirá el emulador, se compilará el código nativo (esto puede tardar unos minutos la primera vez) y se instalará el Cliente de Desarrollo de SIVI en tu dispositivo.
 
-¡Felicidades! Ya deberías estar viendo la pantalla de inicio de sesión de Sivi en tu celular.
+¡Felicidades! Ya deberías estar viendo la pantalla de inicio de sesión de Sivi.
 
 ## ¿Dónde empiezo a leer el código?
 

@@ -24,7 +24,7 @@ La conectividad móvil está cimentada sobre **tres capas independientes**, cada
                   Port: 443 (HTTPS)  Port: 443 (WSS)     Ports: 8888 & 8889 (HTTPS)
                           │               │                      │
               ┌───────────▼───────────────▼──────────┐   ┌───────▼───────────────┐
-              │    control.guardian.imperium.pe      │   │  control.sivi.i...    │
+              │ orchestrator.guardian.imperium.pe   │   │ control.guardian...   │
               │  (API REST + Socket.IO Server BFF)   │   │  (MediaMTX Streaming) │
               └──────────────────────────────────────┘   └───────────────────────┘
 ```
@@ -36,12 +36,12 @@ La conectividad móvil está cimentada sobre **tres capas independientes**, cada
 La comunicación nativa está dividida geográficamente y por infraestructura técnica para optimizar la velocidad y seguridad de transmisión de datos sensibles:
 
 ### 1. Dominio de Control (BFF & WebSockets)
-* **URL:** `https://control.guardian.imperium.pe`
+* **URL:** `https://orchestrator.guardian.imperium.pe` (y los subdominios de cada Workspace activo, como `control.guardian.imperium.pe`).
 * **Protocolos:** HTTPS (REST API) y WSS (Socket.IO).
-* **Propósito:** Registro y autenticación de usuarios, obtención de inventario de cámaras, consulta forense de alertas históricas, y recepción en milisegundos de eventos en vivo.
+* **Propósito:** Registro y autenticación unificada de usuarios, consulta a la pasarela API Gateway, inventario de cámaras, consulta forense de alertas históricas, y recepción en milisegundos de eventos en vivo.
 
 ### 2. Dominio de Contenido Multimedia (Streaming Media Server)
-* **URL:** `https://control.sivi.imperium.pe`
+* **URL:** `https://control.guardian.imperium.pe`
 * **Protocolos:** HTTPS (SDP Offer/Answer para WebRTC, y M3U8 para HLS).
 * **Propósito:** Retransmisión de video comprimido H.264 de cámaras IP directo a dispositivos móviles. Utiliza el servidor open-source de alto rendimiento **MediaMTX**.
 
@@ -60,6 +60,7 @@ La aplicación móvil está construida con tecnologías de vanguardia para asegu
   * El token JWT activo (`jwtToken`).
   * El dominio activo seleccionado (`activeDomain`).
   * Los datos del usuario autenticado (`userData`).
+  * Las sesiones activas de cada workspace (`workspaceSessions`), el workspace seleccionado (`activeWorkspace`) y las personificaciones de superusuario (`impersonatedWorkspace`).
   * Almacenamiento seguro en el llavero del dispositivo móvil a través de `expo-secure-store` para mantener la sesión iniciada de manera persistente.
 
 ### 3. Redes y Sockets (Tiempo Real)
@@ -75,3 +76,4 @@ La aplicación móvil está construida con tecnologías de vanguardia para asegu
   * **Latencia:** 3 - 5 segundos.
   * **Flujo:** Si las restricciones de red móvil bloquean los puertos WebRTC (UDP/ICE), el reproductor integrado cae de forma automática a la descarga por segmentos TS mediante listas de reproducción `.m3u8` en el puerto `8888`.
 * **WebView Reproductor:** Para una renderización impecable y alto rendimiento en la decodificación de video, la app inyecta un HTML optimizado con aceleración por hardware dentro de un `<WebView>` nativo.
+
