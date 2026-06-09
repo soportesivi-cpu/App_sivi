@@ -78,10 +78,14 @@ La aplicación organiza su conectividad en **tres capas independientes** con pro
 *   Consume endpoints para la autenticación unificada (`/mobile/auth/login`), resúmenes de estado (`/mobile/workspaces/summary`), listado de dispositivos (`/mobile/workspaces/devices`), configuración de alertas (`/mobile/workspaces/alarms/configurations`) e incidentes.
 *   Envía las credenciales y tokens de sesión en el payload para el aislamiento dinámico de Workspaces.
 
-### 2. Capa de Tiempo Real (WebSocket WSS - Puerto 443)
+### 2. Capa de Tiempo Real (WebSocket WS/WSS)
 *   **Librería Crítica:** `socket.io-client@2.3.0` (Engine.IO v3).
 *   **Nota Técnica:** El servidor backend SIVI requiere estrictamente el protocolo `EIO=3` para el handshake inicial. La aplicación **no debe actualizar a socket.io v3.x o v4.x** ya que rompería la compatibilidad.
+*   **Resolución Dinámica:** La aplicación decide automáticamente si conectarse mediante protocolo seguro (**`wss://`**) o inseguro (**`ws://`**):
+    *   **`wss://` (producción):** Se utiliza cuando se conecta a un dominio público/producción (ej. `orchestrator.guardian.imperium.pe` bajo HTTPS en el puerto `443`).
+    *   **`ws://` (local/desarrollo):** Se utiliza cuando el dominio configurado es local (localhost, IPs de red privada como `192.168.x.x` o puertos locales), evitando problemas con certificados SSL locales.
 *   **Eventos:** Escucha de forma multiplexada sobre namespaces `/workspace-data`, `/workspace-lpr`, `/workspace-motion`, `/workspace-GUNS` para notificaciones inmediatas de rostros (`face`), placas (`lpr`), intrusiones (`alert`), movimiento (`event_motion`) y armas (`GUNS`).
+
 
 ### 3. Capa de Video Streaming (HTTPS/WSS - Puertos 8888 & 8889)
 *   **Servidor de Media:** MediaMTX en `control.guardian.imperium.pe`
@@ -148,5 +152,17 @@ Este proyecto está configurado para usar EAS (Expo Application Services) para l
 
 ---
 
+## 🛠️ Ajustes Especiales de Compilación y Red
+
+Para asegurar el correcto funcionamiento en desarrollo y producción, el proyecto cuenta con dos configuraciones clave:
+
+1.  **Tráfico Cleartext en Android (`app.config.js`):**
+    Para permitir conexiones locales `http://` y `ws://` (inseguras) utilizadas durante el desarrollo o mediante VPNs, el archivo [app.config.js](file:///d:/app_sivi/AliceGuardianApp/app.config.js) utiliza un plugin de configuración personalizado (`withCleartextTraffic`) para inyectar automáticamente la propiedad `android:usesCleartextTraffic="true"` en el manifiesto nativo de Android (`AndroidManifest.xml`) durante la compilación.
+2.  **Resolución de Dependencias en la Nube (`eas.json`):**
+    Durante el proceso de build en Expo Application Services (EAS), se inyecta la variable de entorno `NPM_CONFIG_LEGACY_PEER_DEPS: "true"`. Esto previene fallos de compilación por conflictos de peer dependencies entre las versiones específicas de React Native, React y dependencias nativas del proyecto.
+
+---
+
 ## 📜 Licencia
 Propiedad de Sivi / Ebenezer Techs. Todos los derechos reservados.
+
