@@ -26,13 +26,15 @@ import {
   updateWorkspaceAlarmPolygons,
   getDevices
 } from '../../services/api';
+import { Colors } from '../../constants/theme';
 
 export default function EventConfigScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const queryClient = useQueryClient();
-  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions, jwtToken: token } = useAppStore();
+  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions, jwtToken: token, isDarkMode } = useAppStore();
   const currentWs = impersonatedWorkspace || activeWorkspace;
+  const styles = getStyles(isDarkMode);
 
   // Estados Accordion
   const [rulesExpanded, setRulesExpanded] = useState(true);
@@ -338,7 +340,7 @@ export default function EventConfigScreen() {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#2E9BFF" />
-        <Text style={{ color: 'rgba(255, 255, 255, 0.6)', marginTop: 15, fontSize: 14, fontWeight: '600' }}>
+        <Text style={{ color: isDarkMode ? 'rgba(255, 255, 255, 0.6)' : '#374151', marginTop: 15, fontSize: 14, fontWeight: '600' }}>
           Cargando configuración de la alarma...
         </Text>
       </View>
@@ -349,10 +351,10 @@ export default function EventConfigScreen() {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
         <Ionicons name="alert-circle-outline" size={56} color="#F44336" />
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', marginTop: 15 }}>
+        <Text style={{ color: isDarkMode ? '#fff' : '#111827', fontSize: 18, fontWeight: '800', marginTop: 15 }}>
           Error al cargar la alarma
         </Text>
-        <Text style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: 12, textAlign: 'center', marginTop: 8, marginBottom: 24 }}>
+        <Text style={{ color: isDarkMode ? 'rgba(255, 255, 255, 0.5)' : '#6b7280', fontSize: 12, textAlign: 'center', marginTop: 8, marginBottom: 24 }}>
           {String(error || 'No se pudo recuperar la información detallada desde la API.')}
         </Text>
         <TouchableOpacity onPress={() => router.replace('/(tabs)/events')} style={styles.saveBtn}>
@@ -444,7 +446,7 @@ export default function EventConfigScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
       {/* HEADER PREMIUM */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.replace('/(tabs)/events')} style={styles.backBtn} activeOpacity={0.7}>
@@ -473,7 +475,7 @@ export default function EventConfigScreen() {
           <View style={styles.inputGroup}>
             <Text style={styles.selectorLabel}>NOMBRE</Text>
             <TextInput 
-              style={[styles.darkInput, { color: 'rgba(255,255,255,0.7)', backgroundColor: '#090B14' }]} 
+              style={[styles.darkInput, { opacity: 0.7 }]} 
               value={alarm.name || ''} 
               editable={false} 
             />
@@ -488,8 +490,8 @@ export default function EventConfigScreen() {
             <Switch 
               value={eventActive} 
               onValueChange={setEventActive} 
-              trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-              thumbColor={eventActive ? '#2E9BFF' : '#555'}
+              trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+              thumbColor={eventActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
             />
           </View>
 
@@ -530,7 +532,7 @@ export default function EventConfigScreen() {
               <Ionicons name="list-outline" size={20} color="#2E9BFF" />
               <Text style={styles.blockTitle}>REGLAS REGISTRADAS</Text>
             </View>
-            <Ionicons name={rulesExpanded ? "chevron-up" : "chevron-down"} size={16} color="#fff" />
+            <Ionicons name={rulesExpanded ? "chevron-up" : "chevron-down"} size={16} color={isDarkMode ? '#fff' : '#111827'} />
           </TouchableOpacity>
 
           {rulesExpanded && (
@@ -589,7 +591,7 @@ export default function EventConfigScreen() {
               <Ionicons name="notifications-outline" size={20} color="#2E9BFF" />
               <Text style={styles.blockTitle}>ACCIONES REGISTRADAS</Text>
             </View>
-            <Ionicons name={actionsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#fff" />
+            <Ionicons name={actionsExpanded ? "chevron-up" : "chevron-down"} size={16} color={isDarkMode ? '#fff' : '#111827'} />
           </TouchableOpacity>
 
           {actionsExpanded && (
@@ -601,8 +603,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={popUpActive} 
                     onValueChange={setPopUpActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={popUpActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={popUpActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
                 <View style={styles.switchCol}>
@@ -610,8 +612,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={notifiableActive} 
                     onValueChange={setNotifiableActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={notifiableActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={notifiableActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -623,8 +625,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={whatsappActive} 
                     onValueChange={setWhatsappActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={whatsappActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={whatsappActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
                 <View style={styles.switchCol}>
@@ -632,8 +634,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={emailActive} 
                     onValueChange={setEmailActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={emailActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={emailActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -645,8 +647,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={soundActionActive} 
                     onValueChange={setSoundActionActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={soundActionActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={soundActionActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
                 <View style={styles.switchCol}>
@@ -654,8 +656,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={alertActive} 
                     onValueChange={setAlertActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={alertActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={alertActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -667,8 +669,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={confirmationActive} 
                     onValueChange={setConfirmationActive} 
-                    trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                    thumbColor={confirmationActive ? '#2E9BFF' : '#555'}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                    thumbColor={confirmationActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -705,8 +707,8 @@ export default function EventConfigScreen() {
                 <Switch 
                   value={roiActive} 
                   onValueChange={setRoiActive} 
-                  trackColor={{ false: '#25283D', true: '#2E9BFF30' }}
-                  thumbColor={roiActive ? '#2E9BFF' : '#555'}
+                  trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
+                  thumbColor={roiActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
                 />
               </View>
               
@@ -831,148 +833,159 @@ export default function EventConfigScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000' },
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: 16, 
-    height: 64, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#ffffff08',
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0,
-    backgroundColor: '#000'
-  },
-  backBtn: { padding: 8 },
-  headerTitle: { color: '#fff', fontSize: 16, fontWeight: '700', flex: 1, marginHorizontal: 10 },
-  logoBox: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#2E9BFF15', justifyContent: 'center', alignItems: 'center' },
+const getStyles = (isDark: boolean) => {
+  const themeColors = isDark ? Colors.dark : Colors.light;
+  const bgMain = themeColors.background;
+  const bgCard = themeColors.surface;
+  const textPrimary = themeColors.text;
+  const textSecondary = themeColors.textSecondary;
+  const textMuted = themeColors.textMuted;
+  const borderCol = themeColors.border;
+  const bgCardSecondary = themeColors.surfaceSecondary;
 
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 64 },
-  titleSection: { marginTop: 20, marginBottom: 20 },
-  mainTitle: { color: '#ffffff', fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  subTitle: { color: 'rgba(255,255,255,0.45)', fontSize: 13, marginTop: 4, fontWeight: '500' },
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: bgMain },
+    header: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      paddingHorizontal: 16, 
+      height: 64, 
+      borderBottomWidth: 1, 
+      borderBottomColor: borderCol,
+      paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0,
+      backgroundColor: bgMain
+    },
+    backBtn: { padding: 8 },
+    headerTitle: { color: textPrimary, fontSize: 16, fontWeight: '700', flex: 1, marginHorizontal: 10 },
+    logoBox: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#2E9BFF15', justifyContent: 'center', alignItems: 'center' },
 
-  bentoBlock: { backgroundColor: '#1A1C2C', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#ffffff08' },
-  blockHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
-  blockTitle: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: '#ffffff' },
+    scrollContent: { paddingHorizontal: 16, paddingBottom: 64 },
+    titleSection: { marginTop: 20, marginBottom: 20 },
+    mainTitle: { color: textPrimary, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+    subTitle: { color: textSecondary, fontSize: 13, marginTop: 4, fontWeight: '500' },
 
-  accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+    bentoBlock: { backgroundColor: bgCard, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: borderCol },
+    blockHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
+    blockTitle: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: textPrimary },
 
-  // Estilos de Reporte de Reglas
-  reportCard: {
-    backgroundColor: '#090B14',
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
-  reportCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-    paddingBottom: 8,
-    marginBottom: 8,
-  },
-  reportAnalyticText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  reportStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    gap: 4,
-  },
-  reportStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  reportStatusText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  reportDetailsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  reportDetailItem: {
-    flex: 1,
-  },
-  reportDetailLabel: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  reportDetailValue: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
+    accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
 
-  // Estilos de Tablas
-  table: { borderWidth: 1, borderColor: '#ffffff10', borderRadius: 8, overflow: 'hidden' },
-  tableHeader: { flexDirection: 'row', backgroundColor: '#11131e', borderBottomWidth: 1, borderBottomColor: '#ffffff10' },
-  tableHeaderText: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '800' },
-  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#ffffff08', backgroundColor: '#090B14' },
-  tableCell: { paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center' },
-  tableCellText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  statusBadgeCell: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    // Estilos de Reporte de Reglas
+    reportCard: {
+      backgroundColor: bgCardSecondary,
+      borderRadius: 10,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    reportCardHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor: borderCol,
+      paddingBottom: 8,
+      marginBottom: 8,
+    },
+    reportAnalyticText: {
+      color: textPrimary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    reportStatusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 3,
+      paddingHorizontal: 8,
+      borderRadius: 6,
+      gap: 4,
+    },
+    reportStatusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    reportStatusText: {
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    reportDetailsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    reportDetailItem: {
+      flex: 1,
+    },
+    reportDetailLabel: {
+      color: textMuted,
+      fontSize: 8,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+      marginBottom: 2,
+    },
+    reportDetailValue: {
+      color: textPrimary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
 
-  // Estilos de los switches estilo Web
-  switchRow: { flexDirection: 'row', gap: 8 },
-  switchCol: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#090B14', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ffffff08' },
-  switchLabel: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    // Estilos de Tablas
+    table: { borderWidth: 1, borderColor: borderCol, borderRadius: 8, overflow: 'hidden' },
+    tableHeader: { flexDirection: 'row', backgroundColor: bgCardSecondary, borderBottomWidth: 1, borderBottomColor: borderCol },
+    tableHeaderText: { color: textSecondary, fontSize: 11, fontWeight: '800' },
+    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: borderCol, backgroundColor: bgCard },
+    tableCell: { paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center' },
+    tableCellText: { color: textPrimary, fontSize: 11, fontWeight: '600' },
+    statusBadgeCell: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  settingLabel: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  settingDesc: { color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 2, fontWeight: '500' },
-  divider: { height: 1, backgroundColor: 'rgba(255, 255, 255, 0.04)', marginVertical: 14 },
+    // Estilos de los switches estilo Web
+    switchRow: { flexDirection: 'row', gap: 8 },
+    switchCol: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: bgCardSecondary, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: borderCol },
+    switchLabel: { color: textPrimary, fontSize: 12, fontWeight: '700' },
 
-  selectorLabel: { color: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  soundScroll: { marginTop: 10 },
-  soundPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
-  soundPillActive: { backgroundColor: '#2E9BFF18', borderColor: '#2E9BFF40' },
-  soundPillInactive: { backgroundColor: '#090B14', borderColor: 'rgba(255,255,255,0.06)' },
-  soundText: { fontSize: 11, fontWeight: '700' },
-  soundTextActive: { color: '#2E9BFF' },
-  soundTextInactive: { color: 'rgba(255,255,255,0.4)' },
+    settingRow: { flexDirection: 'row', alignItems: 'center', gap: 15 },
+    settingLabel: { color: textPrimary, fontSize: 14, fontWeight: '700' },
+    settingDesc: { color: textSecondary, fontSize: 11, marginTop: 2, fontWeight: '500' },
+    divider: { height: 1, backgroundColor: borderCol, marginVertical: 14 },
 
-  pointsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  pointTag: { backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  pointTagText: { color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '700' },
+    selectorLabel: { color: textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+    soundScroll: { marginTop: 10 },
+    soundPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+    soundPillActive: { backgroundColor: '#2E9BFF18', borderColor: '#2E9BFF40' },
+    soundPillInactive: { backgroundColor: bgCardSecondary, borderColor: borderCol },
+    soundText: { fontSize: 11, fontWeight: '700' },
+    soundTextActive: { color: '#2E9BFF' },
+    soundTextInactive: { color: textMuted },
 
-  roiContainer: { width: '100%', aspectRatio: 16/9, borderRadius: 12, overflow: 'hidden', backgroundColor: '#000', marginTop: 16, borderWidth: 1, borderColor: '#ffffff10' },
-  roiImage: { width: '100%', height: '100%', opacity: 0.25 },
-  roiOverlay: { ...StyleSheet.absoluteFillObject, padding: 12 },
-  roiTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#000000cc', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start', gap: 6, borderWidth: 1, borderColor: '#ffffff10' },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F44336' },
-  roiTagText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  roiVideo: { width: '100%', height: '100%', backgroundColor: '#000' },
-  playOverlayBtn: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', gap: 8 },
-  playBtnText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-  pauseBtn: { position: 'absolute', top: 12, right: 12, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+    pointsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+    pointTag: { backgroundColor: bgCardSecondary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: borderCol },
+    pointTagText: { color: textSecondary, fontSize: 10, fontWeight: '700' },
 
-  alarmBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.03)' },
-  alarmBoxActive: { backgroundColor: 'rgba(244, 67, 54, 0.04)', borderWidth: 1, borderColor: 'rgba(244, 67, 54, 0.15)' },
-  alarmParams: { marginTop: 14 },
-  inputGroup: { gap: 6 },
-  darkInput: { backgroundColor: '#090B14', height: 46, borderRadius: 10, paddingHorizontal: 14, color: '#fff', fontSize: 13, fontWeight: '700', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  timeRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
-  timeInputBox: { flex: 1, gap: 6 },
+    roiContainer: { width: '100%', aspectRatio: 16/9, borderRadius: 12, overflow: 'hidden', backgroundColor: '#000', marginTop: 16, borderWidth: 1, borderColor: borderCol },
+    roiImage: { width: '100%', height: '100%', opacity: 0.25 },
+    roiOverlay: { ...StyleSheet.absoluteFillObject, padding: 12 },
+    roiTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#000000cc' : '#ffffffcc', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start', gap: 6, borderWidth: 1, borderColor: borderCol },
+    liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F44336' },
+    roiTagText: { color: textPrimary, fontSize: 10, fontWeight: '700' },
+    roiVideo: { width: '100%', height: '100%', backgroundColor: '#000' },
+    playOverlayBtn: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', gap: 8 },
+    playBtnText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+    pauseBtn: { position: 'absolute', top: 12, right: 12, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
 
-  saveBtn: { backgroundColor: '#2E9BFF', height: 50, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8, alignSelf: 'center', paddingHorizontal: 24 },
-  saveBtnText: { color: '#fff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+    alarmBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: bgCardSecondary },
+    alarmBoxActive: { backgroundColor: 'rgba(244, 67, 54, 0.04)', borderWidth: 1, borderColor: 'rgba(244, 67, 54, 0.15)' },
+    alarmParams: { marginTop: 14 },
+    inputGroup: { gap: 6 },
+    darkInput: { backgroundColor: bgCardSecondary, height: 46, borderRadius: 10, paddingHorizontal: 14, color: textPrimary, fontSize: 13, fontWeight: '700', borderWidth: 1, borderColor: borderCol },
+    timeRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
+    timeInputBox: { flex: 1, gap: 6 },
 
-});
+    saveBtn: { backgroundColor: '#2E9BFF', height: 50, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8, alignSelf: 'center', paddingHorizontal: 24 },
+    saveBtnText: { color: '#fff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+
+  });
+};
 
 

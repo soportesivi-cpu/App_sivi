@@ -187,9 +187,9 @@ export async function autoLogin(email: string, password: string) {
     console.log(`[API GATEWAY] Intentando login consolidado en: ${loginUrl}`);
 
     const controller = new AbortController();
-    timeoutId = setTimeout(() => {
-      controller.abort();
-    }, 8000);
+     timeoutId = setTimeout(() => {
+       controller.abort();
+     }, 15000); // Ampliado a 15s para dar tiempo a la consulta federada de todos los workspaces
 
     const res = await fetch(loginUrl, {
       method: 'POST',
@@ -788,17 +788,19 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
         effective = `${((attendedForEff / totalAlertsForEff) * 100).toFixed(2)}%`;
       }
 
-      let avgResponse = '-- h';
-      let medianResponse = '-- h';
-      let minResponse = '-- h';
-      let unanswered = '0%';
+      let avgResponse = '-';
+      let medianResponse = '-';
+      let minResponse = '-';
+      let unanswered = '-';
+
+      if (totalVal > 0) {
+        unanswered = `${((unresolvedCount / totalVal) * 100).toFixed(1)}%`;
+      }
 
       if (resOperatorTime) {
         const avgSec = resOperatorTime.averageSeconds;
         const bestSec = resOperatorTime.bestSeconds;
         const p95Sec = resOperatorTime.p95Seconds;
-        const pendingT = resOperatorTime.pendingWithoutActionTimestamp ?? pendingCount;
-        const totalT = resOperatorTime.total ?? totalVal;
 
         if (typeof avgSec === 'number' && avgSec > 0) {
           avgResponse = formatDuration(avgSec);
@@ -808,9 +810,6 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
         }
         if (typeof bestSec === 'number' && bestSec > 0) {
           minResponse = formatDuration(bestSec);
-        }
-        if (totalT > 0) {
-          unanswered = `${Math.round((pendingT / totalT) * 100)}%`;
         }
       }
 
@@ -842,7 +841,7 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
       metrics: { total: recentAlerts.length, resolved: 0, unresolved: recentAlerts.length, effective: "0%" },
       recentAlerts,
       classification: { falsePositive: 0, positive: 0, pending: recentAlerts.length },
-      responseTime: { avg: '-- h', median: '-- h', min: '-- h', unanswered: '100%' },
+      responseTime: { avg: '-', median: '-', min: '-', unanswered: '-' },
       isConsolidated: false
     };
   } catch (error) {
@@ -856,7 +855,7 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
       metrics: { total: 0, resolved: 0, unresolved: 0, effective: "0%" },
       recentAlerts: [],
       classification: { falsePositive: 0, positive: 0, pending: 0 },
-      responseTime: { avg: '-- h', median: '-- h', min: '-- h', unanswered: '0%' }
+      responseTime: { avg: '-', median: '-', min: '-', unanswered: '-' }
     };
   }
 }
@@ -968,6 +967,15 @@ export async function getWorkspacesDevices(sessions: any[]) {
   return fetchGateway('/mobile/workspaces/devices');
 }
 
+const RESERVED_TAGS = [
+  'person', 'persona', 'personas',
+  'weapon', 'gun', 'arma', 'armas',
+  'face', 'rostro', 'rostros',
+  'vehiculo', 'vehículos', 'moto', 'auto',
+  'zona', 'alerta', 'alerts',
+  'aforo', 'manos arriba', 'zona segura'
+];
+
 export async function searchForense(params: {
   type?: string;
   date_from?: string;
@@ -988,12 +996,18 @@ export async function searchForense(params: {
     const q = (params.query || '').trim();
     const queryPayload: any = {};
     if (q) {
-      if (/^[A-Za-z0-9-]{3,8}$/.test(q)) {
-        queryPayload.plate = q;
-      } else if (q.toLowerCase().includes('intrusion') || q.toLowerCase().includes('motion')) {
-        queryPayload.smartEventName = q.toLowerCase();
+      const qLower = q.toLowerCase();
+      const isReserved = RESERVED_TAGS.includes(qLower);
+
+      if (isReserved) {
+        // Excluimos las palabras clave reservadas para que el servidor devuelva eventos generales
+        // en el rango de fechas, permitiendo al cliente realizar el filtrado robusto en memoria.
+      } else if (/^[A-Za-z0-9-]{3,8}$/.test(q) && /\d.*\d/.test(q)) {
+        queryPayload.plate = q.toUpperCase();
+      } else if (qLower.includes('intrusion') || qLower.includes('motion')) {
+        queryPayload.smartEventName = qLower;
       } else {
-        queryPayload.faceName = q;
+        queryPayload.faceName = q.toUpperCase();
       }
     }
 
@@ -1030,7 +1044,7 @@ export async function searchForense(params: {
     const wsResults = bodyRes.workspaces || [];
     let rows: any[] = [];
     let totalCount = 0;
-
+    let hasMore = false;
     wsResults.forEach((wsRes: any) => {
       if (wsRes.rows && Array.isArray(wsRes.rows)) {
         const normalizedRows = normalizeSearchRows(wsRes.rows, wsRes.backendUrl).map(row => ({
@@ -1039,6 +1053,11 @@ export async function searchForense(params: {
         }));
         rows = [...rows, ...normalizedRows];
         totalCount += wsRes.count || wsRes.rows.length;
+
+        const wsPages = wsRes.pages || Math.ceil((wsRes.count || wsRes.rows.length) / 30) || 1;
+        if (wsRes.rows.length >= 30 || (wsRes.page || 1) < wsPages) {
+          hasMore = true;
+        }
       }
     });
 
@@ -1046,11 +1065,12 @@ export async function searchForense(params: {
       rows,
       count: totalCount,
       page: params.page || 1,
-      pages: Math.ceil(totalCount / 30) || 1
+      pages: Math.ceil(totalCount / 30) || 1,
+      hasMore
     };
   } catch (e) {
     console.error('[API GATEWAY] Búsqueda forense falló:', e);
-    return { rows: [], count: 0, page: params.page || 1, pages: 1 };
+    return { rows: [], count: 0, page: params.page || 1, pages: 1, hasMore: false };
   }
 }
 

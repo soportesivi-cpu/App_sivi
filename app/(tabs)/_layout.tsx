@@ -1,19 +1,11 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '../../services/store';
-
-// Colores SIVI (Secure Core Aesthetic)
-const SIVI_THEME = {
-  background: '#0A0A0B',
-  surface: '#121214',
-  primary: '#2E9BFF',
-  text: '#ffffff',
-  textMuted: '#ffffff', // De plomo a blanco para máxima claridad
-  border: '#ffffff10'
-};
+import { Colors } from '../../constants/theme';
 
 export default function TabsLayout() {
-  const { userData, impersonatedWorkspace } = useAppStore();
+  const { userData, impersonatedWorkspace, isDarkMode } = useAppStore();
+  const themeColors = isDarkMode ? Colors.dark : Colors.light;
   const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
   const restrictAccess = isSuperAdmin && !impersonatedWorkspace;
   const hideCameras = restrictAccess;
@@ -23,16 +15,16 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#0E0E0E',
-          borderTopColor: SIVI_THEME.border,
+          backgroundColor: isDarkMode ? '#0E0E0E' : '#FFFFFF',
+          borderTopColor: themeColors.border,
           borderTopWidth: 1,
           height: 85,
           paddingBottom: 25,
           paddingTop: 10,
           display: restrictAccess ? 'none' : 'flex', // Ocultamos la barra completa si no hay workspace
         },
-        tabBarActiveTintColor: SIVI_THEME.primary,
-        tabBarInactiveTintColor: SIVI_THEME.textMuted,
+        tabBarActiveTintColor: Colors.brand.primary,
+        tabBarInactiveTintColor: themeColors.textMuted,
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: '600',

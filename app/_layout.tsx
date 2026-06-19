@@ -12,6 +12,7 @@ export default function RootLayout() {
   const isHydrated = useAppStore((state) => state.isHydrated);
   const jwtToken = useAppStore((state) => state.jwtToken);
   const activeDomain = useAppStore((state) => state.activeDomain);
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
 
   useEffect(() => {
     hydrate();
@@ -44,7 +45,7 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <StatusBar style="light" />
+      <StatusBar style={isDarkMode ? "light" : "dark"} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />

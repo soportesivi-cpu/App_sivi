@@ -23,6 +23,7 @@ import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
 import { playNotificationSound } from '../../services/sound';
 import { useLocalSearchParams, router } from 'expo-router';
+import { Colors } from '../../constants/theme';
 
 type Alert = {
   id: number;
@@ -43,7 +44,215 @@ type Alert = {
   incidentId?: number;
   incidentName?: string;
   sentDescriptions?: Array<{ id: number | string; username: string; description: string; timestamp: string }>;
+  plate?: string;
+  plate_char?: string;
+  user_trained?: {
+    id?: number;
+    name?: string;
+    userName?: string;
+  };
 };
+
+function extractFaceName(item: Alert): string | null {
+  console.log('[DEBUG extractFaceName] ID:', item.id, 'motive_categorie:', item.motive_categorie, 'name_categorie:', item.name_categorie, 'tag:', item.tag, 'face_detected_url:', item.face_detected_url);
+  if (item.user_trained) {
+    const name = item.user_trained.userName || item.user_trained.name;
+    if (name && name.trim()) return name.trim();
+  }
+
+  const tag = item.tag ? item.tag.replace(/^,\s*/, '').trim() : '';
+  if (!tag) {
+    console.log('[DEBUG extractFaceName] tag is falsy or missing');
+    return null;
+  }
+
+  const motive = (item.motive_categorie || '').toLowerCase();
+  const nameCat = (item.name_categorie || '').toLowerCase();
+  const tagLower = tag.toLowerCase();
+
+  const isRostro = motive.includes('face') || motive.includes('rostro') ||
+    nameCat.includes('face') || nameCat.includes('rostro') ||
+    tagLower.includes('face') || tagLower.includes('rostro') ||
+    !!item.face_detected_url;
+
+  console.log('[DEBUG extractFaceName] isRostro:', isRostro, 'tagLower:', tagLower);
+
+  if (isRostro) {
+    const ignored = ['person', 'face', 'rostro', 'unknown', 'alert', 'tracker', 'smart_event', 'smartevent'];
+    if (!ignored.includes(tagLower)) {
+      console.log('[DEBUG extractFaceName] returning tag:', tag);
+      return tag;
+    } else {
+      console.log('[DEBUG extractFaceName] tag is in ignored list');
+    }
+  }
+  return null;
+}
+
+function formatFechaDDMMYY(fechaStr: string): string {
+  if (!fechaStr) return '--/--/----';
+  const date = parseUTCDate(fechaStr);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function getWhatsAppDateLabel(createdAtStr: string): string {
+  if (!createdAtStr) return 'ALERTA';
+  const alertDate = parseUTCDate(createdAtStr);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (alertDate.toDateString() === today.toDateString()) {
+    return 'HOY';
+  } else if (alertDate.toDateString() === yesterday.toDateString()) {
+    return 'AYER';
+  } else {
+    return alertDate.toLocaleDateString('es-PE', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    }).toUpperCase();
+  }
+}
+
+function getWhatsAppDateLabelFromTimestamp(timestampStr: string): string {
+  if (!timestampStr) return 'MINUTA';
+  const parts = timestampStr.split(',');
+  const datePart = parts[0].trim();
+  
+  const todayDateStr = new Date().toLocaleDateString('es-PE', { month: 'short', day: 'numeric', year: 'numeric' }).trim();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayDateStr = yesterday.toLocaleDateString('es-PE', { month: 'short', day: 'numeric', year: 'numeric' }).trim();
+  
+  if (datePart === todayDateStr) {
+    return 'HOY';
+  } else if (datePart === yesterdayDateStr) {
+    return 'AYER';
+  } else {
+    return datePart.toUpperCase();
+  }
+}
+
+function getWhatsAppTimeFromTimestamp(timestampStr: string): string {
+  if (!timestampStr) return '';
+  const parts = timestampStr.split(',');
+  if (parts.length > 1) {
+    const timePart = parts[1].trim();
+    const timeSubparts = timePart.split(':');
+    if (timeSubparts.length >= 2) {
+      return `${timeSubparts[0]}:${timeSubparts[1]}`;
+    }
+    return timePart;
+  }
+  return timestampStr;
+}
+
+function extractPlate(item: Alert): string | null {
+  console.log('[DEBUG extractPlate] ID:', item.id, 'motive_categorie:', item.motive_categorie, 'name_categorie:', item.name_categorie, 'tag:', item.tag);
+  if (item.plate && item.plate.trim()) return item.plate.trim();
+  if (item.plate_char && item.plate_char.trim()) return item.plate_char.trim();
+
+  const tag = item.tag ? item.tag.trim() : '';
+  if (!tag) return null;
+
+  const motive = (item.motive_categorie || '').toLowerCase();
+  const nameCat = (item.name_categorie || '').toLowerCase();
+  const tagLower = tag.toLowerCase();
+
+  const isVehiculo = motive.includes('lpr') || motive.includes('plate') || motive.includes('placa') || motive.includes('car') || motive.includes('vehiculo') ||
+    nameCat.includes('lpr') || nameCat.includes('plate') || nameCat.includes('placa') || nameCat.includes('car') || nameCat.includes('vehiculo') ||
+    tagLower.includes('lpr') || tagLower.includes('plate') || tagLower.includes('placa') || tagLower.includes('car') || tagLower.includes('vehiculo');
+
+  if (isVehiculo) {
+    const ignored = ['car', 'vehicle', 'vehiculo', 'lpr', 'plate', 'placa', 'alert', 'tracker', 'smart_event', 'smartevent'];
+    if (!ignored.includes(tagLower)) {
+      return tag;
+    }
+  }
+  return null;
+}
+
+type ObjectDetectionInfo = {
+  label: string;
+  value: string;
+  color: string;
+  icon: string;
+};
+
+function extractObjectDetection(item: Alert, isDarkMode: boolean = true): ObjectDetectionInfo | null {
+  // 1. Si es rostro conocido
+  const faceName = extractFaceName(item);
+  if (faceName) {
+    return {
+      label: 'PERSONA IDENTIFICADA',
+      value: faceName.toUpperCase(),
+      color: isDarkMode ? '#4caf50' : '#15803D',
+      icon: '👤'
+    };
+  }
+
+  // 2. Si es placa LPR
+  const plate = extractPlate(item);
+  if (plate) {
+    return {
+      label: 'PLACA DETECTADA',
+      value: plate.toUpperCase(),
+      color: isDarkMode ? '#ffcf8f' : '#B45309',
+      icon: '🚗'
+    };
+  }
+
+  // 3. Fallback a Detección de Objetos Genéricos o Amenazas
+  if (!item.tag) return null;
+  const tagLower = item.tag.toLowerCase();
+
+  // Caso: Armas / Amenazas Críticas
+  if (tagLower === 'weapon' || tagLower === 'gun' || tagLower === 'pistol' || tagLower === 'arma') {
+    return {
+      label: 'AMENAZA DETECTADA',
+      value: 'ARMA DE FUEGO',
+      color: isDarkMode ? '#f44336' : '#DC2626',
+      icon: '🔫'
+    };
+  }
+
+  // Caso: Fuego / Humo
+  if (tagLower === 'fire' || tagLower === 'smoke' || tagLower === 'fuego') {
+    return {
+      label: 'AMENAZA DETECTADA',
+      value: 'INCENDIO / FUEGO',
+      color: isDarkMode ? '#f44336' : '#DC2626',
+      icon: '🔥'
+    };
+  }
+
+  // Caso: Persona Genérica
+  if (tagLower === 'person' || tagLower === 'persona') {
+    return {
+      label: 'OBJETO DETECTADO',
+      value: 'PERSONA',
+      color: isDarkMode ? '#2E9BFF' : '#1D4ED8',
+      icon: '👤'
+    };
+  }
+
+  // Caso: Vehículo Genérico
+  if (tagLower === 'car' || tagLower === 'truck' || tagLower === 'vehicle' || tagLower === 'moto') {
+    return {
+      label: 'OBJETO DETECTADO',
+      value: 'VEHÍCULO',
+      color: isDarkMode ? '#03a9f4' : '#0369A1',
+      icon: '🚗'
+    };
+  }
+
+  return null;
+}
+
 
 type AlertCardItemProps = {
   item: Alert;
@@ -139,6 +348,8 @@ function AlertCardItem({
   const probNum = Number(item.probability) || 0;
   const prob = probNum > 1 ? probNum : probNum * 100;
 
+  const detection = extractObjectDetection(item, isDarkMode);
+
   const isResolved = item.is_confirmed === true || item.is_fp === true || item.is_ignored === true || item.state === 'resolved' || item.state === 'ignored';
 
   const getEvidenceUrl = (alertItem: Alert) => {
@@ -172,13 +383,18 @@ function AlertCardItem({
           <Text style={styles.gridCardTitle} numberOfLines={1}>
             {alarmName}
           </Text>
+          {detection && (
+            <Text style={{ color: detection.color, fontSize: 11, fontWeight: '700', marginTop: 1, marginBottom: 4 }} numberOfLines={1}>
+              {detection.icon} {detection.value}
+            </Text>
+          )}
           <View style={styles.gridCardLabelRow}>
             <Text style={styles.gridCardLabel}>PROB.</Text>
-            <Text style={styles.gridCardLabel}>HORA</Text>
+            <Text style={styles.gridCardLabel}>{formatHora(item.createdAt)}</Text>
           </View>
           <View style={styles.gridCardValueRow}>
             <Text style={styles.gridCardProbValue}>{prob.toFixed(0)}%</Text>
-            <Text style={styles.gridCardTimeValue}>{formatHora(item.createdAt)}</Text>
+            <Text style={styles.gridCardTimeValue}>{formatFechaDDMMYY(item.createdAt)}</Text>
           </View>
         </View>
 
@@ -211,7 +427,18 @@ function AlertCardItem({
         imageStyle={{ opacity: 0.8 }}
       >
         <View style={styles.cardOverlayTop}>
-          <View style={[styles.badge, { backgroundColor: isResolved ? (item.is_confirmed === true ? '#4caf50' : item.is_fp === true ? '#ff9800' : '#ffffff60') : '#2196f3' }]}>
+          <View style={[
+            styles.badge,
+            {
+              backgroundColor: isResolved
+                ? (item.is_confirmed === true
+                  ? (isDarkMode ? '#4caf50' : '#15803D')
+                  : item.is_fp === true
+                    ? (isDarkMode ? '#ff9800' : '#B45309')
+                    : (isDarkMode ? 'rgba(255, 255, 255, 0.2)' : '#4B5563'))
+                : (isDarkMode ? '#2196f3' : '#1D4ED8')
+            }
+          ]}>
             <Text style={styles.badgeText}>
               {isResolved ? (item.is_confirmed === true ? 'CONFIRMADA' : item.is_fp === true ? 'FALSO POS.' : 'IGNORADA') : 'PENDIENTE'}
             </Text>
@@ -223,14 +450,20 @@ function AlertCardItem({
         <View style={styles.footerRow}>
           <View style={styles.footerInfo}>
             <Text style={[styles.cardTipo, { color: theme.color }]}>
-              <Ionicons name={theme.icon as any} size={14} /> {alarmName.toUpperCase()}
+              {alarmName.toUpperCase()}
             </Text>
             <Text style={styles.cardCam} numberOfLines={1}>
               {item.device?.name || item.deviceId || 'Cámara no especificada'}
             </Text>
+            {detection && (
+              <Text style={{ color: detection.color, fontSize: 11, fontWeight: '700', marginTop: 3 }} numberOfLines={1}>
+                {detection.icon} {detection.value}
+              </Text>
+            )}
           </View>
           <View style={styles.footerMetrics}>
             <Text style={styles.cardHora}>{formatHora(item.createdAt)}</Text>
+            <Text style={styles.cardHora}>{formatFechaDDMMYY(item.createdAt)}</Text>
             <Text style={styles.cardProb}>{prob.toFixed(0)}%</Text>
           </View>
         </View>
@@ -557,16 +790,16 @@ export default function AlertsScreen() {
       if (isNextPage) {
         setAlerts(prev => {
           const merged = [...prev, ...mappedRows];
-          if (merged.length >= 150) {
+          if (merged.length >= 300) {
             setHasMore(false);
-            return merged.slice(0, 150);
+            return merged.slice(0, 300);
           }
           return merged;
         });
       } else {
         setAlerts(mappedRows);
         setPage(1);
-        if (mappedRows.length < limitPerPage || mappedRows.length >= 150) {
+        if (mappedRows.length < limitPerPage || mappedRows.length >= 300) {
           setHasMore(false);
         } else {
           setHasMore(true);
@@ -695,7 +928,10 @@ export default function AlertsScreen() {
           is_ignored: rawData.is_ignored ?? null,
           state: rawData.state ?? 'pending',
           vinfo: typeof rawData.vinfo === 'string' ? rawData.vinfo : JSON.stringify(rawData.vinfo || {}),
-          name_categorie: rawData.name_categorie || undefined
+          name_categorie: rawData.name_categorie || undefined,
+          plate: rawData.plate || undefined,
+          plate_char: rawData.plate_char || undefined,
+          user_trained: rawData.user_trained || undefined
         });
       });
 
@@ -737,21 +973,21 @@ export default function AlertsScreen() {
   function getAnalyticTheme(tag: string) {
     const t = (tag || '').toLowerCase();
     if (t.includes('fire') || t.includes('fuego') || t.includes('weapon') || t.includes('arma') || t.includes('crítica') || t.includes('critical')) {
-      return { color: '#f44336', icon: 'flame', label: 'CRÍTICA' };
+      return { color: isDarkMode ? '#f44336' : '#DC2626', icon: 'flame', label: 'CRÍTICA' };
     }
     if (t.includes('lpr') || t.includes('plate') || t.includes('placa') || t.includes('car')) {
-      return { color: '#03a9f4', icon: 'car', label: 'VEHÍCULO' };
+      return { color: isDarkMode ? '#03a9f4' : '#0369A1', icon: 'car', label: 'VEHÍCULO' };
     }
     if (t.includes('face') || t.includes('rostro')) {
-      return { color: '#4caf50', icon: 'person', label: 'ROSTRO' };
+      return { color: isDarkMode ? '#4caf50' : '#15803D', icon: 'person', label: 'ROSTRO' };
     }
     if (t.includes('count') || t.includes('aforo') || t.includes('people')) {
-      return { color: '#9c27b0', icon: 'people', label: 'MÉTRICA' };
+      return { color: isDarkMode ? '#9c27b0' : '#86198F', icon: 'people', label: 'MÉTRICA' };
     }
     if (t.includes('zone') || t.includes('zona') || t.includes('intrus') || t.includes('motion') || t.includes('movimiento')) {
-      return { color: '#ff9800', icon: 'warning', label: 'INTRUSIÓN' };
+      return { color: isDarkMode ? '#ff9800' : '#B45309', icon: 'warning', label: 'INTRUSIÓN' };
     }
-    return { color: '#2196f3', icon: 'scan', label: 'ACTIVO' };
+    return { color: isDarkMode ? '#2196f3' : '#1D4ED8', icon: 'scan', label: 'ACTIVO' };
   }
 
   function getEvidenceUrl(item: Alert) {
@@ -889,10 +1125,6 @@ export default function AlertsScreen() {
     }
   }
 
-  if (loading) {
-    return <Loading />;
-  }
-
   const filteredAlerts = alerts.filter(item => {
     const query = searchQuery.toLowerCase().trim();
     if (!query) return true;
@@ -900,6 +1132,58 @@ export default function AlertsScreen() {
     const camName = (item.device?.name || '').toLowerCase();
     return typeTag.includes(query) || camName.includes(query);
   });
+
+  const flatItemsWithDividers = useMemo(() => {
+    const items: Array<
+      | { type: 'divider'; dateLabel: string; id: string }
+      | { type: 'grid-row'; leftAlert: Alert; rightAlert?: Alert; id: string }
+      | { type: 'list-row'; alert: Alert; id: string }
+    > = [];
+    
+    const groups: Record<string, Alert[]> = {};
+    const orderedLabels: string[] = [];
+    
+    filteredAlerts.forEach(alert => {
+      const label = getWhatsAppDateLabel(alert.createdAt);
+      if (!groups[label]) {
+        groups[label] = [];
+        orderedLabels.push(label);
+      }
+      groups[label].push(alert);
+    });
+    
+    orderedLabels.forEach(label => {
+      items.push({ type: 'divider', dateLabel: label, id: `div-${label}` });
+      const groupAlerts = groups[label];
+      
+      if (viewMode === 'grid') {
+        for (let i = 0; i < groupAlerts.length; i += 2) {
+          const leftAlert = groupAlerts[i];
+          const rightAlert = groupAlerts[i + 1];
+          items.push({
+            type: 'grid-row',
+            leftAlert,
+            rightAlert,
+            id: `grid-${leftAlert.id}-${rightAlert ? rightAlert.id : 'empty'}`
+          });
+        }
+      } else {
+        groupAlerts.forEach(alert => {
+          items.push({
+            type: 'list-row',
+            alert,
+            id: `list-${alert.id}`
+          });
+        });
+      }
+    });
+    
+    return items;
+  }, [filteredAlerts, viewMode]);
+
+  if (loading) {
+    return <Loading />;
+  }
 
   const styles = getStyles(isDarkMode);
 
@@ -920,7 +1204,7 @@ export default function AlertsScreen() {
           <Ionicons
             name={viewMode === 'grid' ? "list-outline" : "grid-outline"}
             size={20}
-            color="#fff"
+            color={isDarkMode ? '#ffffff' : '#111827'}
           />
         </TouchableOpacity>
       </View>
@@ -938,41 +1222,86 @@ export default function AlertsScreen() {
 
       {/* BUSCADOR */}
       <View style={styles.searchBar}>
-        <Ionicons name="search" size={18} color="#ffffff40" />
+        <Ionicons name="search" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Buscar por cámara o tipo..."
-          placeholderTextColor="#ffffff40"
+          placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
           style={styles.searchInput}
           autoCapitalize="none"
           autoCorrect={false}
         />
         {searchQuery !== '' && (
           <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 4 }}>
-            <Ionicons name="close-circle" size={16} color="#ffffff40" />
+            <Ionicons name="close-circle" size={16} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
           </TouchableOpacity>
         )}
       </View>
 
       <FlatList
         key={viewMode}
-        numColumns={viewMode === 'grid' ? 2 : 1}
-        data={filteredAlerts}
-        keyExtractor={(item, index) => `${item.id}-${index}`}
+        data={flatItemsWithDividers}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.lista}
-        renderItem={({ item }) => (
-          <AlertCardItem
-            item={item}
-            viewMode={viewMode}
-            onPress={setSelectedAlert}
-            domain={domain}
-            formatHora={formatHora}
-            getAnalyticTheme={getAnalyticTheme}
-            isDarkMode={isDarkMode}
-            styles={styles}
-          />
-        )}
+        renderItem={({ item }) => {
+          if (item.type === 'divider') {
+            return (
+              <View style={styles.whatsappDateContainer}>
+                <View style={styles.whatsappDateBubble}>
+                  <Text style={styles.whatsappDateText}>{item.dateLabel}</Text>
+                </View>
+              </View>
+            );
+          }
+          if (item.type === 'grid-row') {
+            return (
+              <View style={styles.gridRow}>
+                <View style={styles.gridRowHalf}>
+                  <AlertCardItem
+                    item={item.leftAlert}
+                    viewMode="grid"
+                    onPress={setSelectedAlert}
+                    domain={domain}
+                    formatHora={formatHora}
+                    getAnalyticTheme={getAnalyticTheme}
+                    isDarkMode={isDarkMode}
+                    styles={styles}
+                  />
+                </View>
+                <View style={styles.gridRowHalf}>
+                  {item.rightAlert ? (
+                    <AlertCardItem
+                      item={item.rightAlert}
+                      viewMode="grid"
+                      onPress={setSelectedAlert}
+                      domain={domain}
+                      formatHora={formatHora}
+                      getAnalyticTheme={getAnalyticTheme}
+                      isDarkMode={isDarkMode}
+                      styles={styles}
+                    />
+                  ) : (
+                    <View style={{ flex: 1, margin: 6 }} />
+                  )}
+                </View>
+              </View>
+            );
+          }
+          // item.type === 'list-row'
+          return (
+            <AlertCardItem
+              item={item.alert}
+              viewMode="list"
+              onPress={setSelectedAlert}
+              domain={domain}
+              formatHora={formatHora}
+              getAnalyticTheme={getAnalyticTheme}
+              isDarkMode={isDarkMode}
+              styles={styles}
+            />
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.centrado}>
             <Ionicons name="shield-checkmark" size={48} color="#ffffff20" />
@@ -989,7 +1318,7 @@ export default function AlertsScreen() {
           ) : !hasMore && alerts.length > 0 ? (
             <View style={{ paddingVertical: 20, alignItems: 'center' }}>
               <Text style={{ color: '#ffffff40', fontSize: 11, fontWeight: '600' }}>
-                Fin del historial reciente (Máx. 150 alertas)
+                Fin del historial reciente (Máx. 300 alertas)
               </Text>
             </View>
           ) : null
@@ -1037,7 +1366,7 @@ export default function AlertsScreen() {
                 }}
                 style={styles.modalHeaderCloseBtn}
               >
-                <Ionicons name="close" size={18} color="#fff" />
+                <Ionicons name="close" size={18} color={isDarkMode ? '#ffffff' : '#111827'} />
               </TouchableOpacity>
             </View>
 
@@ -1070,29 +1399,50 @@ export default function AlertsScreen() {
                 const probNum = Number(selectedAlert.probability) || 0;
                 const prob = probNum > 1 ? probNum : probNum * 100;
 
+                const detection = extractObjectDetection(selectedAlert, isDarkMode);
+
                 return (
                   <View style={styles.gridContainer2x2}>
-                    {/* Dispositivo (Expandido a ancho completo) */}
-                    <View style={[styles.infoFullCard, { marginBottom: 10 }]}>
-                      <Text style={styles.gridItemLabel}>DISPOSITIVO</Text>
-                      <Text style={styles.gridItemVal} numberOfLines={1}>
-                        {selectedAlert.device?.name || 'Cámara'}
-                      </Text>
-                    </View>
+                    {/* Dispositivo + Metadato al costado si existen */}
+                    {detection ? (
+                      <View style={styles.gridRow2x2}>
+                        <View style={styles.gridItemCard}>
+                          <Text style={styles.gridItemLabel}>DISPOSITIVO</Text>
+                          <Text style={styles.gridItemVal} numberOfLines={1}>
+                            {selectedAlert.device?.name || 'Cámara'}
+                          </Text>
+                        </View>
+                        <View style={styles.gridItemCard}>
+                          <Text style={styles.gridItemLabel}>{detection.label}</Text>
+                          <Text style={[styles.gridItemVal, { color: detection.color }]} numberOfLines={1}>
+                            {detection.value}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={[styles.infoFullCard, { marginBottom: 10 }]}>
+                        <Text style={styles.gridItemLabel}>DISPOSITIVO</Text>
+                        <Text style={styles.gridItemVal} numberOfLines={1}>
+                          {selectedAlert.device?.name || 'Cámara'}
+                        </Text>
+                      </View>
+                    )}
 
                     <View style={styles.gridRow2x2}>
                       {/* Probabilidad */}
                       <View style={styles.gridItemCard}>
                         <Text style={styles.gridItemLabel}>PROBABILIDAD</Text>
-                        <Text style={[styles.gridItemVal, { color: '#4caf50' }]}>
+                        <Text style={[styles.gridItemVal, { color: detection ? detection.color : '#4caf50' }]}>
                           {prob.toFixed(0)}%
                         </Text>
                       </View>
                       {/* Fecha */}
                       <View style={styles.gridItemCard}>
-                        <Text style={styles.gridItemLabel}>FECHA DE ALERTA</Text>
+                        <Text style={styles.gridItemLabel}>
+                          {selectedAlert ? formatHora(selectedAlert.createdAt) : 'HORA'}
+                        </Text>
                         <Text style={styles.gridItemVal} numberOfLines={1}>
-                          {selectedAlert ? formatFechaPrecisa(selectedAlert.createdAt) : ''}
+                          {selectedAlert ? formatFechaDDMMYY(selectedAlert.createdAt) : ''}
                         </Text>
                       </View>
                     </View>
@@ -1146,6 +1496,9 @@ export default function AlertsScreen() {
                   }
                 }
 
+                const faceName = extractFaceName(selectedAlert);
+                const plate = extractPlate(selectedAlert);
+
                 return (
                   <View style={styles.infoSectionMockup}>
                     <Text style={styles.infoSectionTitle}>INFORMACIÓN DE ALERTA</Text>
@@ -1175,7 +1528,11 @@ export default function AlertsScreen() {
               {selectedAlert && (() => {
                 const isResolved = selectedAlert.is_confirmed === true || selectedAlert.is_fp === true || selectedAlert.is_ignored === true || selectedAlert.state === 'resolved' || selectedAlert.state === 'ignored';
                 const resolvedLabel = selectedAlert.is_confirmed === true ? 'ALERTA CONFIRMADA' : selectedAlert.is_fp === true ? 'FALSO POSITIVO' : 'ALERTA IGNORADA';
-                const resolvedColor = selectedAlert.is_confirmed === true ? '#4CAF50' : selectedAlert.is_fp === true ? '#FF9800' : '#ffffff60';
+                const resolvedColor = selectedAlert.is_confirmed === true
+                  ? (isDarkMode ? '#4CAF50' : '#15803D')
+                  : selectedAlert.is_fp === true
+                    ? (isDarkMode ? '#FF9800' : '#B45309')
+                    : (isDarkMode ? 'rgba(255,255,255,0.5)' : '#4B5563');
 
                 return (
                   <View style={styles.resolutionSectionMockup}>
@@ -1195,7 +1552,7 @@ export default function AlertsScreen() {
                           <View style={styles.minutaInputRow}>
                             <TextInput
                               placeholder="Escribe una descripción del incidente..."
-                              placeholderTextColor="#ffffff30"
+                              placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.4)'}
                               multiline
                               style={styles.minutaInput}
                               value={noteText}
@@ -1216,21 +1573,58 @@ export default function AlertsScreen() {
                         </View>
 
                         {/* Notas Enviadas dinámicamente en esta sesión */}
-                        {selectedAlert.sentDescriptions && selectedAlert.sentDescriptions.length > 0 ? (
-                          <View style={styles.sentNotesList}>
-                            {selectedAlert.sentDescriptions.map((note) => (
-                              <View key={note.id} style={styles.sentNoteCard}>
-                                <View style={styles.sentNoteHeader}>
-                                  <View style={styles.sentNoteUserBadge}>
-                                    <Text style={styles.sentNoteUserText}>{note.username}</Text>
+                        {selectedAlert.sentDescriptions && selectedAlert.sentDescriptions.length > 0 ? (() => {
+                          const groupedNotes: Array<
+                            | { type: 'divider'; dateLabel: string }
+                            | { type: 'note'; noteData: any }
+                          > = [];
+                          let lastDateLabel = '';
+
+                          selectedAlert.sentDescriptions.forEach((note) => {
+                            const dateLabel = getWhatsAppDateLabelFromTimestamp(note.timestamp);
+                            if (dateLabel !== lastDateLabel) {
+                              groupedNotes.push({ type: 'divider', dateLabel });
+                              lastDateLabel = dateLabel;
+                            }
+                            groupedNotes.push({ type: 'note', noteData: note });
+                          });
+
+                          return (
+                            <View style={styles.chatContainer}>
+                              {groupedNotes.map((item, index) => {
+                                if (item.type === 'divider') {
+                                  return (
+                                    <View key={`chat-div-${index}`} style={styles.chatDateDivider}>
+                                      <View style={styles.chatDateBubble}>
+                                        <Text style={styles.chatDateText}>{item.dateLabel}</Text>
+                                      </View>
+                                    </View>
+                                  );
+                                }
+
+                                const note = item.noteData;
+                                const isCurrentUser = note.username === userData?.Username;
+                                const timeStr = getWhatsAppTimeFromTimestamp(note.timestamp);
+
+                                return (
+                                  <View
+                                    key={note.id}
+                                    style={[
+                                      styles.messageBubble,
+                                      isCurrentUser ? styles.myMessage : styles.otherMessage
+                                    ]}
+                                  >
+                                    {!isCurrentUser && (
+                                      <Text style={styles.messageUser}>{note.username}</Text>
+                                    )}
+                                    <Text style={styles.messageText}>{note.description}</Text>
+                                    <Text style={styles.messageTime}>{timeStr}</Text>
                                   </View>
-                                  <Text style={styles.sentNoteTimeText}>{note.timestamp}</Text>
-                                </View>
-                                <Text style={styles.sentNoteBodyText}>{note.description}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        ) : null}
+                                );
+                              })}
+                            </View>
+                          );
+                        })() : null}
                       </View>
                     ) : (
                       <View style={styles.modalActionSectionMockup}>
@@ -1333,7 +1727,7 @@ export default function AlertsScreen() {
               if (realTimePopupAlert.vinfo) {
                 try {
                   popupVinfo = typeof realTimePopupAlert.vinfo === 'string' ? JSON.parse(realTimePopupAlert.vinfo) : realTimePopupAlert.vinfo;
-                } catch (e) {}
+                } catch (e) { }
               }
               const popupAlarmName = (
                 popupVinfo?.name ||
@@ -1343,6 +1737,9 @@ export default function AlertsScreen() {
                 realTimePopupAlert.name_categorie ||
                 'Alerta de Seguridad'
               ).trim();
+
+              const popupFaceName = extractFaceName(realTimePopupAlert);
+              const popupPlate = extractPlate(realTimePopupAlert);
 
               return (
                 <>
@@ -1376,6 +1773,16 @@ export default function AlertsScreen() {
                         <Text style={styles.popupAlarmName} numberOfLines={1}>
                           {popupAlarmName}
                         </Text>
+                        {popupFaceName && (
+                          <Text style={{ color: '#4caf50', fontSize: 11, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
+                            👤 {popupFaceName.toUpperCase()}
+                          </Text>
+                        )}
+                        {popupPlate && (
+                          <Text style={{ color: '#ffcf8f', fontSize: 11, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
+                            🚗 {popupPlate.toUpperCase()}
+                          </Text>
+                        )}
                         <View style={styles.popupMetricsRow}>
                           <Text style={styles.popupMetricLabel}>Probabilidad: </Text>
                           <Text style={[styles.popupMetricValue, { color: theme.color }]}>
@@ -1427,13 +1834,14 @@ export default function AlertsScreen() {
 }
 
 const getStyles = (isDark: boolean) => {
-  const bgMain = isDark ? '#0d0d0d' : '#f3f4f6';
-  const bgCard = isDark ? '#161622' : '#ffffff';
-  const textPrimary = isDark ? '#ffffff' : '#111827';
-  const textSecondary = isDark ? '#ffffff60' : '#6b7280';
-  const textMuted = isDark ? '#ffffff40' : '#9ca3af';
-  const borderCol = isDark ? '#ffffff10' : '#e5e7eb';
-
+  const themeColors = isDark ? Colors.dark : Colors.light;
+  const bgMain = themeColors.background;
+  const bgCard = themeColors.surface;
+  const textPrimary = themeColors.text;
+  const textSecondary = themeColors.textSecondary;
+  const textMuted = themeColors.textMuted;
+  const borderCol = themeColors.border;
+  const bgCardSecondary = themeColors.surfaceSecondary;
 
   return StyleSheet.create({
     container: {
@@ -1463,9 +1871,9 @@ const getStyles = (isDark: boolean) => {
       width: 40,
       height: 40,
       borderRadius: 10,
-      backgroundColor: '#161622',
+      backgroundColor: bgCardSecondary,
       borderWidth: 1,
-      borderColor: '#ffffff15',
+      borderColor: borderCol,
       alignItems: 'center',
       justifyContent: 'center',
       elevation: 2,
@@ -1479,7 +1887,7 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 15,
     },
     tituloGestion: {
-      color: '#ffffff',
+      color: textPrimary,
       fontSize: 28,
       fontWeight: '800',
     },
@@ -1510,10 +1918,10 @@ const getStyles = (isDark: boolean) => {
     searchBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: '#161622',
+      backgroundColor: bgCardSecondary,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: '#ffffff10',
+      borderColor: borderCol,
       paddingHorizontal: 15,
       height: 48,
       marginHorizontal: 20,
@@ -1521,7 +1929,7 @@ const getStyles = (isDark: boolean) => {
     },
     searchInput: {
       flex: 1,
-      color: '#ffffff',
+      color: textPrimary,
       fontSize: 14,
       marginLeft: 10,
       paddingVertical: 8,
@@ -1546,7 +1954,7 @@ const getStyles = (isDark: boolean) => {
       backgroundColor: bgCard,
       borderRadius: 14,
       borderWidth: 1,
-      borderColor: '#ffffff10',
+      borderColor: borderCol,
       overflow: 'hidden',
       elevation: 2,
       shadowColor: '#000',
@@ -1561,11 +1969,11 @@ const getStyles = (isDark: boolean) => {
       paddingHorizontal: 10,
       backgroundColor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
       borderBottomWidth: 1,
-      borderBottomColor: '#ffffff05',
+      borderBottomColor: borderCol,
     },
     gridCardCamName: {
       color: textSecondary,
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: '800',
       textTransform: 'uppercase',
     },
@@ -1579,8 +1987,8 @@ const getStyles = (isDark: boolean) => {
       backgroundColor: bgCard,
     },
     gridCardTitle: {
-      color: '#ffffff',
-      fontSize: 11,
+      color: textPrimary,
+      fontSize: 12.5,
       fontWeight: '800',
       marginBottom: 8,
     },
@@ -1590,8 +1998,8 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 2,
     },
     gridCardLabel: {
-      color: textMuted,
-      fontSize: 9,
+      color: isDark ? textMuted : textSecondary,
+      fontSize: 10,
       fontWeight: '700',
     },
     gridCardValueRow: {
@@ -1600,13 +2008,13 @@ const getStyles = (isDark: boolean) => {
       alignItems: 'center',
     },
     gridCardProbValue: {
-      color: '#2E9BFF',
-      fontSize: 16,
+      color: isDark ? '#2E9BFF' : '#1D4ED8',
+      fontSize: 17.5,
       fontWeight: '900',
     },
     gridCardTimeValue: {
       color: textSecondary,
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: '700',
     },
 
@@ -1616,6 +2024,7 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 16,
       overflow: 'hidden',
       borderWidth: 1,
+      borderColor: borderCol,
     },
     cardImage: {
       width: '100%',
@@ -1649,7 +2058,7 @@ const getStyles = (isDark: boolean) => {
 
     cardTipo: { fontSize: 10.5, fontWeight: '800', letterSpacing: 0.5 },
     cardCam: { color: textSecondary, fontSize: 14, fontWeight: '500', marginTop: 4 },
-    cardHora: { color: textMuted, fontSize: 11, marginBottom: 2 },
+    cardHora: { color: isDark ? textMuted : textSecondary, fontSize: 11, marginBottom: 2 },
     cardProb: { color: textPrimary, fontSize: 16, fontWeight: '800' },
 
     // MODAL DETALLE PREMIUM (ESTILO MOCKUP SIVI)
@@ -1659,7 +2068,7 @@ const getStyles = (isDark: boolean) => {
       justifyContent: 'flex-end',
     },
     modalContent: {
-      backgroundColor: '#0d0d0d',
+      backgroundColor: bgMain,
       height: '90%',
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
@@ -1672,9 +2081,9 @@ const getStyles = (isDark: boolean) => {
       paddingHorizontal: 20,
       paddingTop: 20,
       paddingBottom: 15,
-      backgroundColor: '#0d0d0d',
+      backgroundColor: bgMain,
       borderBottomWidth: 1,
-      borderBottomColor: '#ffffff05',
+      borderBottomColor: borderCol,
     },
     modalHeaderLeft: {
       flexDirection: 'row',
@@ -1689,7 +2098,7 @@ const getStyles = (isDark: boolean) => {
       width: 32,
       height: 32,
       borderRadius: 16,
-      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -1716,7 +2125,7 @@ const getStyles = (isDark: boolean) => {
       overflow: 'hidden',
       backgroundColor: '#000',
       borderWidth: 1,
-      borderColor: '#ffffff08',
+      borderColor: borderCol,
     },
     evidenceImageMockup: {
       width: '100%',
@@ -1750,9 +2159,9 @@ const getStyles = (isDark: boolean) => {
     },
     gridItemCard: {
       flex: 1,
-      backgroundColor: '#161622',
+      backgroundColor: bgCardSecondary,
       borderWidth: 1,
-      borderColor: '#ffffff05',
+      borderColor: borderCol,
       borderRadius: 10,
       padding: 12,
       justifyContent: 'center',
@@ -1766,7 +2175,7 @@ const getStyles = (isDark: boolean) => {
       textTransform: 'uppercase',
     },
     gridItemVal: {
-      color: '#ffffff',
+      color: textPrimary,
       fontSize: 12,
       fontWeight: '700',
     },
@@ -1784,9 +2193,9 @@ const getStyles = (isDark: boolean) => {
       textTransform: 'uppercase',
     },
     infoFullCard: {
-      backgroundColor: '#161622',
+      backgroundColor: bgCardSecondary,
       borderWidth: 1,
-      borderColor: '#ffffff05',
+      borderColor: borderCol,
       borderRadius: 10,
       padding: 12,
       marginBottom: 12,
@@ -1799,7 +2208,7 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 4,
     },
     infoItemVal: {
-      color: '#ffffff',
+      color: textPrimary,
       fontSize: 13,
       fontWeight: '800',
     },
@@ -1818,7 +2227,7 @@ const getStyles = (isDark: boolean) => {
       textTransform: 'uppercase',
     },
     modalActionSectionMockup: {
-      backgroundColor: '#0d0d0d',
+      backgroundColor: bgMain,
       borderRadius: 12,
       gap: 12,
     },
@@ -1858,9 +2267,9 @@ const getStyles = (isDark: boolean) => {
       letterSpacing: 0.5,
     },
     resolvedContainerMockup: {
-      backgroundColor: '#161622',
+      backgroundColor: bgCardSecondary,
       borderWidth: 1,
-      borderColor: '#ffffff05',
+      borderColor: borderCol,
       borderRadius: 12,
       padding: 15,
     },
@@ -1896,37 +2305,33 @@ const getStyles = (isDark: boolean) => {
     },
     minutaInput: {
       flex: 1,
-      backgroundColor: '#050505',
+      backgroundColor: isDark ? '#050505' : '#FFFFFF',
       borderWidth: 1,
       borderColor: borderCol,
       borderRadius: 10,
       color: textPrimary,
       paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontSize: 13,
-      minHeight: 45,
+      paddingVertical: 8,
+      minHeight: 44,
+      fontSize: 12,
       textAlignVertical: 'top',
     },
     minutaSendBtn: {
-      width: 45,
-      height: 45,
+      width: 44,
+      height: 44,
       borderRadius: 10,
-      backgroundColor: '#4CAF50',
-      alignItems: 'center',
+      backgroundColor: '#2E9BFF',
       justifyContent: 'center',
+      alignItems: 'center',
     },
     sentNotesList: {
-      flexDirection: 'column',
-      gap: 10,
       marginTop: 15,
-      borderTopWidth: 1,
-      borderColor: borderCol,
-      paddingTop: 15,
+      gap: 10,
     },
     sentNoteCard: {
-      backgroundColor: '#0d0d0d',
-      padding: 12,
+      backgroundColor: isDark ? '#0d0d0d' : '#F9FAFB',
       borderRadius: 10,
+      padding: 12,
       borderWidth: 1,
       borderColor: borderCol,
     },
@@ -1937,32 +2342,31 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 6,
     },
     sentNoteUserBadge: {
-      backgroundColor: '#2E9BFF20',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
+      backgroundColor: 'rgba(46, 155, 255, 0.1)',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
       borderRadius: 4,
     },
     sentNoteUserText: {
       color: '#2E9BFF',
-      fontSize: 10,
+      fontSize: 9,
       fontWeight: '800',
-      textTransform: 'uppercase',
     },
     sentNoteTimeText: {
       color: textMuted,
       fontSize: 9,
-      fontWeight: '600',
+      fontFamily: 'monospace',
     },
     sentNoteBodyText: {
-      color: textPrimary,
-      fontSize: 13,
-      lineHeight: 18,
+      color: textSecondary,
+      fontSize: 12,
+      lineHeight: 16,
     },
 
-    // EVIDENCIA ZOOM MODAL STYLES
+    // IMAGE ZOOM MODAL STYLES
     zoomContainer: {
       flex: 1,
-      backgroundColor: 'black',
+      backgroundColor: 'rgba(0,0,0,0.95)',
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -1971,6 +2375,7 @@ const getStyles = (isDark: boolean) => {
       top: 50,
       left: 0,
       right: 0,
+      height: 50,
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
@@ -1978,18 +2383,18 @@ const getStyles = (isDark: boolean) => {
       zIndex: 10,
     },
     zoomHeaderTitle: {
-      color: '#ffffffaa',
-      fontSize: 14,
+      color: '#ffffff',
+      fontSize: 12,
       fontWeight: '800',
-      letterSpacing: 0.5,
+      letterSpacing: 1,
     },
     zoomCloseBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: 'rgba(255,255,255,0.15)',
-      alignItems: 'center',
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.1)',
       justifyContent: 'center',
+      alignItems: 'center',
     },
     zoomImage: {
       width: '100%',
@@ -1998,6 +2403,8 @@ const getStyles = (isDark: boolean) => {
     zoomFooter: {
       position: 'absolute',
       bottom: 40,
+      left: 0,
+      right: 0,
       alignItems: 'center',
     },
     zoomFooterText: {
@@ -2006,29 +2413,29 @@ const getStyles = (isDark: boolean) => {
       fontWeight: '500',
     },
 
-    // REAL-TIME POPUP OVERLAY STYLES
+    // POP-UP FLOTANTE NOTIFICACION REAL-TIME
     popupContainer: {
       position: 'absolute',
+      top: Platform.OS === 'ios' ? 50 : 25,
       left: 15,
       right: 15,
-      zIndex: 10000,
+      zIndex: 9999,
+      elevation: 10,
     },
     popupCard: {
       flexDirection: 'row',
-      backgroundColor: 'rgba(22, 22, 34, 0.98)',
-      borderRadius: 16,
-      borderWidth: 1.5,
-      borderColor: '#ffffff10',
+      backgroundColor: '#161622',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.08)',
       overflow: 'hidden',
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.6,
-      shadowRadius: 12,
-      elevation: 10,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
     },
     popupAccentLine: {
-      width: 6,
-      height: '100%',
+      width: 4,
     },
     popupContent: {
       flex: 1,
@@ -2043,10 +2450,10 @@ const getStyles = (isDark: boolean) => {
     popupLiveBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: 'rgba(244, 67, 54, 0.15)',
+      backgroundColor: 'rgba(244,67,54,0.12)',
       paddingHorizontal: 8,
       paddingVertical: 3,
-      borderRadius: 4,
+      borderRadius: 10,
     },
     popupLiveDot: {
       width: 6,
@@ -2057,14 +2464,12 @@ const getStyles = (isDark: boolean) => {
     },
     popupLiveText: {
       color: '#F44336',
-      fontSize: 9,
+      fontSize: 8,
       fontWeight: '900',
       letterSpacing: 0.5,
     },
     popupCloseBtn: {
       padding: 4,
-      backgroundColor: 'rgba(255,255,255,0.08)',
-      borderRadius: 12,
     },
     popupBody: {
       flexDirection: 'row',
@@ -2072,14 +2477,14 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 10,
     },
     popupEvidenceImage: {
-      width: 70,
-      height: 70,
-      borderRadius: 8,
+      width: 56,
+      height: 56,
+      borderRadius: 6,
       backgroundColor: '#000',
+      marginRight: 12,
     },
     popupDetails: {
       flex: 1,
-      marginLeft: 12,
     },
     popupDeviceRow: {
       flexDirection: 'row',
@@ -2087,16 +2492,15 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 2,
     },
     popupDeviceName: {
-      color: '#ffffffaa',
+      color: '#2E9BFF',
       fontSize: 10,
       fontWeight: '800',
       textTransform: 'uppercase',
     },
     popupAlarmName: {
       color: '#ffffff',
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: '800',
-      marginBottom: 4,
     },
     popupMetricsRow: {
       flexDirection: 'row',
@@ -2153,6 +2557,97 @@ const getStyles = (isDark: boolean) => {
       shadowOpacity: 0.8,
       shadowRadius: 8,
       elevation: 5,
+    },
+    whatsappDateContainer: {
+      width: '100%',
+      alignItems: 'center',
+      marginVertical: 14,
+    },
+    whatsappDateBubble: {
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+      paddingHorizontal: 14,
+      paddingVertical: 5,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+    },
+    whatsappDateText: {
+      color: isDark ? '#ffffff80' : '#4B5563',
+      fontSize: 10.5,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    gridRow: {
+      flexDirection: 'row',
+      width: '100%',
+    },
+    gridRowHalf: {
+      flex: 1,
+    },
+    chatContainer: {
+      marginTop: 15,
+      gap: 10,
+      paddingHorizontal: 5,
+    },
+    chatDateDivider: {
+      width: '100%',
+      alignItems: 'center',
+      marginVertical: 10,
+    },
+    chatDateBubble: {
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+    },
+    chatDateText: {
+      color: isDark ? '#ffffff70' : '#4B5563',
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    messageBubble: {
+      maxWidth: '85%',
+      padding: 10,
+      borderRadius: 12,
+      marginVertical: 4,
+      elevation: 1,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+    },
+    myMessage: {
+      alignSelf: 'flex-end',
+      backgroundColor: isDark ? '#056162' : '#E7FFDB',
+      borderTopRightRadius: 2,
+    },
+    otherMessage: {
+      alignSelf: 'flex-start',
+      backgroundColor: bgCardSecondary,
+      borderTopLeftRadius: 2,
+      borderWidth: 1,
+      borderColor: borderCol,
+    },
+    messageUser: {
+      color: '#2E9BFF',
+      fontSize: 10,
+      fontWeight: '800',
+      marginBottom: 3,
+      textTransform: 'uppercase',
+    },
+    messageText: {
+      color: textPrimary,
+      fontSize: 13,
+      lineHeight: 17,
+    },
+    messageTime: {
+      color: isDark ? '#ffffff50' : '#6B7280',
+      fontSize: 9,
+      alignSelf: 'flex-end',
+      marginTop: 4,
     },
   });
 };

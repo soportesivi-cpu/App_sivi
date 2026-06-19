@@ -5,29 +5,54 @@ import { getDashboard, getWorkspaces } from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import Svg, { Circle, G } from 'react-native-svg';
+import { Colors } from '../constants/theme';
 
-// Colores extraídos del Mockup de Stitch (Tailwind config)
-const theme = {
-  background: '#000000',
-  surfaceLow: '#1A1C2C', // Azul oscuro grisáceo de las capturas
-  surfaceHigh: '#25283D',
-  primary: '#2E9BFF', // Azul brillante SIVI
-  secondary: '#5AC8FA',
-  tertiary: '#F44336', // Rojo de alerta
-  warning: '#FF9800', // Naranja falso positivo
-  success: '#4CAF50', // Verde confirmación
-  onBackground: '#FFFFFF',
-  onSurface: '#FFFFFF',
-  onSurfaceVariant: '#ffffff', // Blanco puro para máxima legibilidad
-  outline: '#ffffff15',
-  outlineVariant: '#ffffff',
-  primaryContainer: '#2E9BFF20',
-  secondaryContainer: '#5AC8FA',
-  error: '#F44336',
+const getTheme = (isDark: boolean) => {
+  if (isDark) {
+    return {
+      background: '#000000',
+      surfaceLow: '#1A1C2C', // Azul oscuro grisáceo
+      surfaceHigh: '#25283D',
+      primary: '#2E9BFF', // Azul brillante SIVI
+      secondary: '#5AC8FA',
+      tertiary: '#F44336', // Rojo de alerta
+      warning: '#FF9800', // Naranja falso positivo
+      success: '#4CAF50', // Verde confirmación
+      onBackground: '#FFFFFF',
+      onSurface: '#FFFFFF',
+      onSurfaceVariant: '#ffffff', // Blanco puro
+      outline: '#ffffff15',
+      outlineVariant: '#ffffff',
+      primaryContainer: '#2E9BFF20',
+      secondaryContainer: '#5AC8FA',
+      error: '#F44336',
+    };
+  } else {
+    return {
+      background: '#F3F4F6',
+      surfaceLow: '#FFFFFF', // Blanco para tarjetas
+      surfaceHigh: '#F9FAFB',
+      primary: '#2E9BFF',
+      secondary: '#5AC8FA',
+      tertiary: '#F44336',
+      warning: '#FF9800',
+      success: '#4CAF50',
+      onBackground: '#111827', // Texto oscuro
+      onSurface: '#111827',
+      onSurfaceVariant: '#374151', // Gris más oscuro para cumplir con contraste WCAG AA 4.5:1
+      outline: '#E5E7EB',
+      outlineVariant: '#9CA3AF',
+      primaryContainer: '#2E9BFF15',
+      secondaryContainer: '#5AC8FA',
+      error: '#F44336',
+    };
+  }
 };
 
 export default function AdminDashboard() {
-  const { userData, clearSession, impersonatedWorkspace, setImpersonatedWorkspace, activeWorkspace, isHydrated, activeDomain } = useAppStore();
+  const { userData, clearSession, impersonatedWorkspace, setImpersonatedWorkspace, activeWorkspace, isHydrated, activeDomain, isDarkMode } = useAppStore();
+  const theme = getTheme(isDarkMode);
+  const styles = getStyles(isDarkMode);
 
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<any>(null);
@@ -124,14 +149,19 @@ export default function AdminDashboard() {
       {/* IMPERSONATION BANNER */}
       {impersonatedWorkspace && (
         <View style={{ backgroundColor: theme.primaryContainer, paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>
-            <Ionicons name="eye" size={14} color="#fff" /> Viendo como: {impersonatedWorkspace.name}
+          <Text style={{ color: isDarkMode ? '#ffffff' : '#1E3A8A', fontSize: 13, fontWeight: '600' }}>
+            <Ionicons name="eye" size={14} color={isDarkMode ? '#ffffff' : '#1E3A8A'} /> Viendo como: {impersonatedWorkspace.name}
           </Text>
           <TouchableOpacity 
             onPress={() => setImpersonatedWorkspace(null)} 
-            style={{ backgroundColor: 'rgba(0,0,0,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}
+            style={{ 
+              backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(30, 58, 138, 0.1)', 
+              paddingHorizontal: 12, 
+              paddingVertical: 6, 
+              borderRadius: 16 
+            }}
           >
-            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Salir</Text>
+            <Text style={{ color: isDarkMode ? '#ffffff' : '#1E3A8A', fontSize: 11, fontWeight: 'bold' }}>Salir</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -225,25 +255,25 @@ export default function AdminDashboard() {
               {/* Promedio */}
               <View style={[styles.responseCol, styles.rightBorder]}>
                 <Text style={styles.responseLabel}>Promedio</Text>
-                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.avg || '4.1 h'}</Text>
+                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.avg || '-'}</Text>
               </View>
               
               {/* Mediana */}
               <View style={[styles.responseCol, styles.rightBorder]}>
                 <Text style={styles.responseLabel}>Mediana</Text>
-                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.median || '7.5 h'}</Text>
+                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.median || '-'}</Text>
               </View>
               
               {/* Mínimo */}
               <View style={[styles.responseCol, styles.rightBorder]}>
                 <Text style={styles.responseLabel}>Mínimo</Text>
-                <Text style={styles.responseValueGreen}>{dashboardData.responseTime?.min || '2.6 h'}</Text>
+                <Text style={styles.responseValueGreen}>{dashboardData.responseTime?.min || '-'}</Text>
               </View>
               
               {/* % sin respuesta */}
               <View style={styles.responseCol}>
                 <Text style={styles.responseLabel}>% sin respuesta</Text>
-                <Text style={styles.responseValueYellow}>{dashboardData.responseTime?.unanswered || '0%'}</Text>
+                <Text style={styles.responseValueYellow}>{dashboardData.responseTime?.unanswered || '-'}</Text>
               </View>
             </View>
           </View>
@@ -382,8 +412,8 @@ export default function AdminDashboard() {
 
                 {/* CENTRO DEL DONUT */}
                 <View style={[styles.donutHole, { position: 'absolute', width: 76, height: 76, borderRadius: 38, backgroundColor: '#1A1C2C', justifyContent: 'center', alignItems: 'center' }]}>
-                  <Text style={styles.donutHoleLabel}>TOTAL</Text>
-                  <Text style={styles.donutHoleValue}>{total}</Text>
+                  <Text style={[styles.donutHoleLabel, { color: '#FFFFFF' }]}>TOTAL</Text>
+                  <Text style={[styles.donutHoleValue, { color: '#FFFFFF' }]}>{total}</Text>
                 </View>
               </View>
 
@@ -465,14 +495,13 @@ export default function AdminDashboard() {
           )}
         </ScrollView>
       ) : null}
-
-      {/* Settings Modal eliminado - Navegación directa activada */}
-
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (isDark: boolean) => {
+  const theme = getTheme(isDark);
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: theme.background,
@@ -558,7 +587,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#ffffff10',
+    borderColor: theme.outline,
   },
   textBody: {
     color: theme.onSurface,
@@ -613,7 +642,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#ffffff10',
+    borderColor: theme.outline,
     marginBottom: 8,
   },
   kpiHeader: {
@@ -638,7 +667,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 8,
     borderWidth: 1,
-    borderColor: '#ffffff10',
+    borderColor: theme.outline,
     marginBottom: 8,
     alignItems: 'center',
   },
@@ -684,7 +713,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     marginLeft: 8,
   },
-  // Settings Modal
   modalBg: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
@@ -740,7 +768,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   dashboardTitle: {
-    color: '#FFFFFF',
+    color: theme.onBackground,
     fontSize: 22,
     fontWeight: '900',
     letterSpacing: 0.5,
@@ -765,8 +793,8 @@ const styles = StyleSheet.create({
     borderColor: theme.primary,
   },
   intervalTabInactive: {
-    backgroundColor: '#151724',
-    borderColor: '#ffffff10',
+    backgroundColor: theme.surfaceLow,
+    borderColor: theme.outline,
   },
   intervalTabText: {
     fontSize: 11,
@@ -776,7 +804,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   intervalTabTextInactive: {
-    color: '#9CA3AF',
+    color: theme.onSurfaceVariant,
   },
   metricCard: {
     width: '48.5%',
@@ -787,12 +815,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   metricCardBlue: {
-    backgroundColor: '#0B305C', // Deep royal blue matching the image perfectly
-    borderColor: '#2E9BFF30',
+    backgroundColor: isDark ? '#0B305C' : '#E0F2FE',
+    borderColor: isDark ? '#2E9BFF30' : '#93C5FD',
   },
   metricCardRed: {
-    backgroundColor: '#5C1A1A', // Deep burgundy/crimson matching the image perfectly
-    borderColor: '#EF444430',
+    backgroundColor: isDark ? '#5C1A1A' : '#FEE2E2',
+    borderColor: isDark ? '#EF444430' : '#FCA5A5',
   },
   metricCardHeader: {
     flexDirection: 'row',
@@ -811,7 +839,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   metricCardTitle: {
-    color: '#E5E7EB', // Brighter text color for optimal contrast
+    color: theme.onSurfaceVariant,
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 0.5,
@@ -819,24 +847,24 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   metricCardValue: {
-    color: '#FFFFFF',
+    color: theme.onSurface,
     fontSize: 26,
     fontWeight: 'bold',
     marginBottom: 4,
     fontFamily: 'monospace',
   },
   metricCardSub: {
-    color: '#D1D5DB', // Bright silver-grey contrast
+    color: theme.onSurfaceVariant,
     fontSize: 10,
     marginBottom: 6,
   },
   trendText: {
-    color: '#4ADE80', // High contrast vibrant light green
+    color: '#4ADE80',
     fontSize: 11,
     fontWeight: 'bold',
   },
   trendTextGray: {
-    color: '#E5E7EB', // Light silver grey trend contrast
+    color: theme.onSurfaceVariant,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -845,11 +873,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ffffff10',
+    borderColor: theme.outline,
     marginBottom: 20,
   },
   classificationTitle: {
-    color: '#9CA3AF',
+    color: theme.onSurfaceVariant,
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 0.5,
@@ -874,24 +902,23 @@ const styles = StyleSheet.create({
     borderWidth: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    // Usamos colores de fondo elegantes
     backgroundColor: 'transparent',
   },
   donutHole: {
     width: 86,
     height: 86,
     borderRadius: 43,
-    backgroundColor: '#1A1C2C', // Coincide con theme.surfaceLow para un efecto de corte limpio
+    backgroundColor: theme.surfaceLow,
     justifyContent: 'center',
     alignItems: 'center',
   },
   donutHoleLabel: {
-    color: '#6B7280',
+    color: theme.onSurfaceVariant,
     fontSize: 10,
     fontWeight: 'bold',
   },
   donutHoleValue: {
-    color: '#FFFFFF',
+    color: theme.onSurface,
     fontSize: 22,
     fontWeight: 'bold',
     fontFamily: 'monospace',
@@ -912,12 +939,12 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   legendLabel: {
-    color: '#9CA3AF',
+    color: theme.onSurfaceVariant,
     fontSize: 12,
     flex: 1,
   },
   legendValue: {
-    color: '#FFFFFF',
+    color: theme.onSurface,
     fontSize: 12,
     fontWeight: 'bold',
     fontFamily: 'monospace',
@@ -927,7 +954,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ffffff10',
+    borderColor: theme.outline,
     marginBottom: 10,
   },
   responseTimeRow: {
@@ -943,16 +970,16 @@ const styles = StyleSheet.create({
   },
   rightBorder: {
     borderRightWidth: 1,
-    borderRightColor: '#ffffff10',
+    borderRightColor: theme.outline,
   },
   responseLabel: {
-    color: '#6B7280',
+    color: theme.onSurfaceVariant,
     fontSize: 10,
     marginBottom: 6,
     textAlign: 'center',
   },
   responseValueWhite: {
-    color: '#FFFFFF',
+    color: theme.onSurface,
     fontSize: 16,
     fontWeight: 'bold',
     fontFamily: 'monospace',
@@ -969,4 +996,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontFamily: 'monospace',
   }
-});
+  });
+};

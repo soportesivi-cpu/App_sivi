@@ -4,7 +4,7 @@
     "slug": "AliceGuardianApp",
     "scheme": "aliceguardian",
     "version": "1.2",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon-sivi.png",
     "userInterfaceStyle": "light",
     "splash": {

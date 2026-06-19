@@ -18,6 +18,7 @@ import { getAlarms } from '../../services/api';
 import { useAppStore } from '../../services/store';
 import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
+import { Colors } from '../../constants/theme';
 
 interface EventItem {
   id: number | string;
@@ -54,7 +55,8 @@ const MOCK_EVENTS: EventItem[] = [
 export default function EventsScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
-  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions } = useAppStore();
+  const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions, isDarkMode } = useAppStore();
+  const styles = getStyles(isDarkMode);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Dynamic Workspace Name Resolution
@@ -206,13 +208,12 @@ export default function EventsScreen() {
           </View>
         </View>
 
-        {/* BUSCADOR ESTILO PREMIUM */}
         <View style={styles.searchSection}>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={16} color="#ffffff40" style={styles.searchIcon} />
+            <Ionicons name="search" size={16} color={isDarkMode ? '#ffffff60' : '#4B5563'} style={styles.searchIcon} />
             <TextInput
               placeholder="Buscar regla por nombre..."
-              placeholderTextColor="#ffffff40"
+              placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -275,160 +276,164 @@ export default function EventsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 55,
-    paddingBottom: 8,
-    backgroundColor: '#000000'
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logoBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#0097FF15', justifyContent: 'center', alignItems: 'center' },
-  logoText: { color: '#0097FF', fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
-  headerBtn: { padding: 8 },
+const getStyles = (isDark: boolean) => {
+  const themeColors = isDark ? Colors.dark : Colors.light;
 
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
-  titleRow: { marginTop: 10, marginBottom: 18 },
-  mainTitle: { color: '#ffffff', fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  workspaceContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  workspaceText: { color: '#0097FF', fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: themeColors.background },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 55,
+      paddingBottom: 8,
+      backgroundColor: themeColors.background
+    },
+    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    logoBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#0097FF15', justifyContent: 'center', alignItems: 'center' },
+    logoText: { color: '#0097FF', fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
+    headerBtn: { padding: 8 },
 
-  searchSection: { marginBottom: 20 },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#121626',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: '#ffffff10',
-    height: 48
-  },
-  searchIcon: { marginRight: 10 },
-  searchInput: { flex: 1, color: '#fff', fontSize: 14 },
+    scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
+    titleRow: { marginTop: 10, marginBottom: 18 },
+    mainTitle: { color: themeColors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+    workspaceContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
+    workspaceText: { color: '#0097FF', fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
 
-  eventCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#101424',
-    borderRadius: 12,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#0097FF',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: '#ffffff05'
-  },
-  cardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    paddingRight: 10
-  },
-  iconBoxCamera: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: '#0097FF15',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12
-  },
-  cardInfo: {
-    flex: 1,
-    justifyContent: 'center'
-  },
-  titleBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    flexWrap: 'wrap',
-    gap: 6
-  },
-  eventName: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800'
-  },
-  typeBadge: {
-    backgroundColor: '#0097FF15',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#0097FF30'
-  },
-  typeBadgeText: {
-    color: '#0097FF',
-    fontSize: 9,
-    fontWeight: '900'
-  },
-  subtext: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  cardRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.08)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 5
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.2
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 50,
-    paddingHorizontal: 20,
-    backgroundColor: '#101424',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#ffffff05',
-    marginTop: 10
-  },
-  emptyIconBox: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#0097FF10',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16
-  },
-  emptyText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 8,
-    textAlign: 'center'
-  },
-  emptySubtext: {
-    color: '#94A3B8',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18
-  }
-});
+    searchSection: { marginBottom: 20 },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: themeColors.surfaceSecondary,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: themeColors.border,
+      height: 48
+    },
+    searchIcon: { marginRight: 10 },
+    searchInput: { flex: 1, color: themeColors.text, fontSize: 14 },
+
+    eventCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: themeColors.surface,
+      borderRadius: 12,
+      marginBottom: 12,
+      borderLeftWidth: 4,
+      borderLeftColor: '#0097FF',
+      paddingVertical: 14,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: themeColors.border
+    },
+    cardLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      paddingRight: 10
+    },
+    iconBoxCamera: {
+      width: 42,
+      height: 42,
+      borderRadius: 10,
+      backgroundColor: '#0097FF15',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 12
+    },
+    cardInfo: {
+      flex: 1,
+      justifyContent: 'center'
+    },
+    titleBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+      flexWrap: 'wrap',
+      gap: 6
+    },
+    eventName: {
+      color: themeColors.text,
+      fontSize: 13,
+      fontWeight: '800'
+    },
+    typeBadge: {
+      backgroundColor: '#0097FF15',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: '#0097FF30'
+    },
+    typeBadgeText: {
+      color: '#0097FF',
+      fontSize: 9,
+      fontWeight: '900'
+    },
+    subtext: {
+      color: themeColors.textSecondary,
+      fontSize: 12,
+      fontWeight: '500'
+    },
+    cardRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8
+    },
+    statusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(34, 197, 94, 0.08)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 20
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      marginRight: 5
+    },
+    statusText: {
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.2
+    },
+    emptyContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 50,
+      paddingHorizontal: 20,
+      backgroundColor: themeColors.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: themeColors.border,
+      marginTop: 10
+    },
+    emptyIconBox: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: '#0097FF10',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16
+    },
+    emptyText: {
+      color: themeColors.text,
+      fontSize: 16,
+      fontWeight: '800',
+      marginBottom: 8,
+      textAlign: 'center'
+    },
+    emptySubtext: {
+      color: themeColors.textSecondary,
+      fontSize: 12,
+      textAlign: 'center',
+      lineHeight: 18
+    }
+  });
+};

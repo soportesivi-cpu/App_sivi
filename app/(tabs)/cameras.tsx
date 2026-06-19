@@ -18,6 +18,7 @@ import { getDevices, getWorkspacesDevices, getMediaUrl, getWorkspacesEvents } fr
 import { PROD_MEDIA_DOMAIN, WORKSPACES } from '../../constants/config';
 import Loading from '../../components/Loading';
 import { router } from 'expo-router';
+import { Colors } from '../../constants/theme';
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 
@@ -716,39 +717,38 @@ export default function CamerasScreen() {
             style={styles.filterBtn}
             onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
           >
-            <Ionicons name={viewMode === 'grid' ? "list" : "grid"} size={16} color="#ffffff" />
+            <Ionicons name={viewMode === 'grid' ? "list" : "grid"} size={16} color={isDarkMode ? '#ffffff' : '#111827'} />
           </TouchableOpacity>
         </View>
       </View>
 
-      <View style={{ paddingHorizontal: 20, marginTop: 4, marginBottom: 15 }}>
-        <Text style={{ color: '#ffffff', fontSize: 26, fontWeight: '800' }}>Red de Cámaras</Text>
+      <View style={{ paddingHorizontal: 16, marginTop: 4, marginBottom: 15 }}>
+        <Text style={{ color: isDarkMode ? '#ffffff' : '#111827', fontSize: 26, fontWeight: '800' }}>Red de Cámaras</Text>
       </View>
 
 
-      {/* SEARCH BAR (Automatizado Local) */}
-      <View style={{ paddingHorizontal: 20, marginBottom: 15 }}>
+      <View style={{ paddingHorizontal: 16, marginBottom: 15 }}>
         <View style={{
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: '#1A1C2C',
+          backgroundColor: isDarkMode ? '#1A1C2C' : '#FFFFFF',
           height: 48,
           borderRadius: 12,
           paddingHorizontal: 15,
           borderWidth: 1,
-          borderColor: '#ffffff15'
+          borderColor: isDarkMode ? '#ffffff15' : '#E5E7EB'
         }}>
-          <Ionicons name="search" size={18} color="#ffffff60" />
+          <Ionicons name="search" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
           <TextInput
             placeholder="Buscar cámara por nombre..."
-            placeholderTextColor="#ffffff30"
-            style={{ flex: 1, color: '#fff', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
+            placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
+            style={{ flex: 1, color: isDarkMode ? '#fff' : '#111827', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery !== '' && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={18} color="#ffffff60" />
+              <Ionicons name="close-circle" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
             </TouchableOpacity>
           )}
         </View>
@@ -768,13 +768,13 @@ export default function CamerasScreen() {
           if (viewMode === 'grid') {
             return (
               <TouchableOpacity
-                style={[styles.cardGrid, !online && styles.cardGridOffline]}
+                style={styles.cardGrid}
                 onPress={() => setSelected(item)}
               >
                 <ImageBackground
                   source={{ uri: cameraThumbnails[item.id] || getCameraThumbnail(item) }}
                   style={styles.cardGridTop}
-                  imageStyle={!online ? { opacity: 0.5 } : {}}
+                  imageStyle={!online ? { opacity: 0.4 } : {}}
                 >
                   {online && item.hasMotion ? (
                     <View style={styles.badgeWarning}>
@@ -789,10 +789,10 @@ export default function CamerasScreen() {
                   ) : null}
 
                   {!online && (
-                    <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }}>
-                      <View style={{ backgroundColor: '#161622', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ffffff10' }}>
-                        <Ionicons name="videocam-off" size={14} color="#ffffff" />
-                        <Text style={{ color: '#ffffff', fontSize: 10, marginLeft: 4 }}>Offline</Text>
+                    <View style={{ position: 'absolute', top: 0, bottom: '55%', left: 0, right: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: isDarkMode ? 'rgba(0,0,0,0.4)' : 'rgba(255, 255, 255, 0.15)' }}>
+                      <View style={{ backgroundColor: isDarkMode ? '#161622' : '#F3F4F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: isDarkMode ? '#ffffff10' : '#E5E7EB' }}>
+                        <Ionicons name="videocam-off" size={14} color={isDarkMode ? '#ffffff' : '#4B5563'} />
+                        <Text style={{ color: isDarkMode ? '#ffffff' : '#4B5563', fontSize: 10, marginLeft: 4 }}>Offline</Text>
                       </View>
                     </View>
                   )}
@@ -803,13 +803,13 @@ export default function CamerasScreen() {
                       <Ionicons
                         name={item.hasMotion ? "flash" : "ellipse"}
                         size={item.hasMotion ? 10 : 8}
-                        color={item.hasMotion ? "#FEAA00" : online ? "#4caf50" : "#ff4444"}
+                        color={item.hasMotion ? (isDarkMode ? "#FEAA00" : "#B45309") : online ? (isDarkMode ? "#4caf50" : "#15803D") : (isDarkMode ? "#ff4444" : "#DC2626")}
                       />
                       <Text style={[
                         styles.cardGridStatus,
-                        item.hasMotion && { color: '#FEAA00' },
-                        online && !item.hasMotion && { color: '#4caf50' },
-                        !online && { color: '#ff4444' }
+                        item.hasMotion && { color: isDarkMode ? '#FEAA00' : '#B45309' },
+                        online && !item.hasMotion && { color: isDarkMode ? '#4caf50' : '#15803D' },
+                        !online && { color: isDarkMode ? '#ff4444' : '#DC2626' }
                       ]}>
                         {item.hasMotion ? 'Movimiento' : online ? 'Activa' : 'Sin Conexión'}
                       </Text>
@@ -826,39 +826,37 @@ export default function CamerasScreen() {
               onPress={() => setSelected(item)}
             >
               <View style={styles.cardLeft}>
-                <View style={[styles.iconContainer, item.hasMotion && { backgroundColor: '#FEAA0020' }]}>
+                <View style={[
+                  styles.iconContainer,
+                  item.hasMotion && { backgroundColor: isDarkMode ? '#FEAA0020' : '#FFF7ED', borderColor: isDarkMode ? '#FEAA0040' : '#FED7AA' }
+                ]}>
                   <Ionicons
                     name={item.hasMotion ? "warning" : "videocam"}
                     size={20}
-                    color={item.hasMotion ? '#FEAA00' : online ? '#2E9BFF' : '#ffffff60'}
+                    color={item.hasMotion ? (isDarkMode ? '#FEAA00' : '#B45309') : online ? '#2E9BFF' : (isDarkMode ? 'rgba(255,255,255,0.4)' : '#4B5563')}
                   />
                 </View>
                 <View style={styles.cardInfo}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={styles.cardNombre}>{item.name}</Text>
-                    {online && (isLocal || item.recording?.active) && (
-                      <View style={{ backgroundColor: '#ff444420', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#ff444440' }}>
-                        <Text style={{ color: '#ff4444', fontSize: 8, fontWeight: '900', letterSpacing: 0.5 }}>REC</Text>
-                      </View>
-                    )}
                   </View>
                   {item.hasMotion && (
-                    <Text style={{ color: '#FEAA00', fontSize: 10, fontWeight: '700' }}>• MOVIMIENTO</Text>
+                    <Text style={{ color: isDarkMode ? '#FEAA00' : '#B45309', fontSize: 10, fontWeight: '700' }}>• MOVIMIENTO</Text>
                   )}
                 </View>
               </View>
               <View style={styles.cardRight}>
                 <View style={[
                   styles.statusBadge,
-                  { backgroundColor: online ? '#4caf5018' : '#ffffff08' }
+                  { backgroundColor: online ? (isDarkMode ? '#4caf5018' : '#F0FDF4') : (isDarkMode ? 'rgba(255,255,255,0.05)' : '#F3F4F6') }
                 ]}>
                   <View style={[
                     styles.statusDot,
-                    { backgroundColor: online ? '#4caf50' : '#ffffff40' }
+                    { backgroundColor: online ? (isDarkMode ? '#4caf50' : '#16A34A') : (isDarkMode ? 'rgba(255,255,255,0.3)' : '#9CA3AF') }
                   ]} />
                   <Text style={[
                     styles.statusText,
-                    { color: online ? '#4caf50' : '#ffffff80' }
+                    { color: online ? (isDarkMode ? '#4caf50' : '#15803D') : (isDarkMode ? 'rgba(255,255,255,0.5)' : '#4B5563') }
                   ]}>
                     {online ? 'CONECTADO' : 'DESCONECTADO'}
                   </Text>
@@ -871,7 +869,7 @@ export default function CamerasScreen() {
 
         ListEmptyComponent={
           <View style={styles.centrado}>
-            <Ionicons name="videocam-off-outline" size={48} color="#333" />
+            <Ionicons name="videocam-off-outline" size={48} color={isDarkMode ? '#ffffff30' : '#9CA3AF'} />
             <Text style={styles.vacio}>Sin cámaras registradas</Text>
           </View>
         }
@@ -950,7 +948,7 @@ export default function CamerasScreen() {
           {/* URL DE DEBUG PARA EL USUARIO */}
           {selected && (
             <View style={{ paddingHorizontal: 20, paddingBottom: 10 }}>
-              <Text style={{ color: '#ffeb3b', fontSize: 10, textAlign: 'center' }}>
+              <Text style={{ color: isDarkMode ? '#ffeb3b' : '#2563EB', fontSize: 10, textAlign: 'center' }}>
                 DEBUG URL: {streamMode === 'hls' ? getHlsUrl(selected).split('?')[0] : getWebRtcUrl(selected)}
               </Text>
             </View>
@@ -971,6 +969,7 @@ export default function CamerasScreen() {
                 style={styles.webview}
                 allowsInlineMediaPlayback={true}
                 mediaPlaybackRequiresUserAction={false}
+                allowsFullscreenVideo={true}
                 originWhitelist={['*']}
                 domStorageEnabled={true}
                 javaScriptEnabled={true}
@@ -1035,15 +1034,15 @@ export default function CamerasScreen() {
               const getAnalyticTheme = (tag: string) => {
                 const motive = (tag || '').toLowerCase();
                 if (motive.includes('face') || motive.includes('rostro') || motive.includes('aforo')) {
-                  return { icon: 'person-outline', color: '#5AC8FA' };
+                  return { icon: 'person-outline', color: isDarkMode ? '#5AC8FA' : '#0891B2' };
                 } else if (motive.includes('intrusion') || motive.includes('critical') || motive.includes('error') || motive.includes('motion')) {
-                  return { icon: 'walk-outline', color: '#F44336' };
+                  return { icon: 'walk-outline', color: isDarkMode ? '#F44336' : '#DC2626' };
                 } else if (motive.includes('lpr') || motive.includes('placa') || motive.includes('car')) {
-                  return { icon: 'car-outline', color: '#2E9BFF' };
+                  return { icon: 'car-outline', color: isDarkMode ? '#2E9BFF' : '#1D4ED8' };
                 } else if (motive.includes('objeto') || motive.includes('cube') || motive.includes('arma')) {
-                  return { icon: 'cube-outline', color: '#FF9800' };
+                  return { icon: 'cube-outline', color: isDarkMode ? '#FF9800' : '#B45309' };
                 }
-                return { icon: 'shield-checkmark-outline', color: '#2E9BFF' };
+                return { icon: 'shield-checkmark-outline', color: isDarkMode ? '#2E9BFF' : '#1D4ED8' };
               };
 
               const themeStyle = getAnalyticTheme(item.tag || item.motive_categorie || '');
@@ -1070,11 +1069,11 @@ export default function CamerasScreen() {
                         color={themeStyle.color}
                         style={{ marginRight: 6 }}
                       />
-                      <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '500' }} numberOfLines={1}>
+                      <Text style={{ color: isDarkMode ? '#ffffff' : '#111827', fontSize: 13, fontWeight: '500' }} numberOfLines={1}>
                         {title}
                       </Text>
                     </View>
-                    <Text style={{ color: '#ffffff60', fontSize: 11, marginTop: 4 }}>
+                    <Text style={{ color: isDarkMode ? '#ffffff60' : '#6b7280', fontSize: 11, marginTop: 4 }}>
                       {displayTime} • {alertName}
                     </Text>
                   </View>
@@ -1101,7 +1100,7 @@ export default function CamerasScreen() {
             }}
             ListEmptyComponent={
               <View style={styles.emptyEvents}>
-                <Ionicons name="folder-open-outline" size={32} color="#ffffff20" />
+                <Ionicons name="folder-open-outline" size={32} color={isDarkMode ? "#ffffff20" : "#9CA3AF"} />
                 <Text style={styles.emptyEventsText}>Sin alertas en las últimas 24h</Text>
               </View>
             }
@@ -1116,15 +1115,17 @@ export default function CamerasScreen() {
 }
 
 const getStyles = (isDark: boolean) => {
-  const bgMain = isDark ? '#000000' : '#f3f4f6';
-  const bgCard = isDark ? '#1A1C2C' : '#ffffff';
-  const textPrimary = '#ffffff';
-  const textSecondary = isDark ? '#ffffff90' : '#6b7280';
-  const textMuted = isDark ? '#ffffff60' : '#9ca3af';
-  const borderCol = isDark ? '#ffffff10' : '#e5e7eb';
+  const themeColors = isDark ? Colors.dark : Colors.light;
+  const bgMain = themeColors.background;
+  const bgCard = themeColors.surface;
+  const textPrimary = themeColors.text;
+  const textSecondary = themeColors.textSecondary;
+  const textMuted = themeColors.textMuted;
+  const borderCol = themeColors.border;
   const modalBg = isDark ? '#000000' : '#f9fafb';
   const toggleBg = isDark ? '#111112' : '#e5e7eb';
   const toggleText = isDark ? '#ffffff' : '#6b7280';
+  const bgCardSecondary = themeColors.surfaceSecondary;
 
   return StyleSheet.create({
     container: {
@@ -1178,7 +1179,7 @@ const getStyles = (isDark: boolean) => {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: isDark ? '#161622' : '#ffffff',
+      backgroundColor: bgCard,
       borderWidth: 1,
       borderColor: borderCol,
       paddingHorizontal: 12,
@@ -1216,7 +1217,7 @@ const getStyles = (isDark: boolean) => {
       color: '#ffffff',
     },
     lista: {
-      paddingHorizontal: 20,
+      paddingHorizontal: 16,
       gap: 15,
       paddingBottom: 20,
     },
@@ -1224,7 +1225,7 @@ const getStyles = (isDark: boolean) => {
       justifyContent: 'space-between',
     },
     cardGrid: {
-      width: '48%',
+      width: '48.5%',
       backgroundColor: bgCard,
       borderRadius: 12,
       overflow: 'hidden',
@@ -1232,6 +1233,11 @@ const getStyles = (isDark: boolean) => {
       borderColor: borderCol,
       aspectRatio: 16 / 9,
       marginBottom: 12,
+      shadowColor: isDark ? 'transparent' : '#000000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0 : 0.04,
+      shadowRadius: 8,
+      elevation: isDark ? 0 : 2,
     },
     cardGridOffline: {
       opacity: 0.6,
@@ -1239,7 +1245,7 @@ const getStyles = (isDark: boolean) => {
     cardGridTop: {
       width: '100%',
       height: '100%',
-      backgroundColor: '#000000',
+      backgroundColor: isDark ? '#000000' : '#F1F5F9',
       position: 'relative',
     },
     thumbnailWorker: {
@@ -1281,7 +1287,7 @@ const getStyles = (isDark: boolean) => {
       height: '55%',
       justifyContent: 'flex-end',
       padding: 10,
-      backgroundColor: 'rgba(26, 28, 44, 0.85)', // surfaceLow semi-transparente
+      backgroundColor: isDark ? 'rgba(26, 28, 44, 0.85)' : '#FFFFFF',
     },
     badgeWarning: {
       position: 'absolute',
@@ -1326,6 +1332,11 @@ const getStyles = (isDark: boolean) => {
       justifyContent: 'space-between',
       borderWidth: 1,
       borderColor: borderCol,
+      shadowColor: isDark ? 'transparent' : '#000000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0 : 0.03,
+      shadowRadius: 6,
+      elevation: isDark ? 0 : 1,
     },
     cardLeft: {
       flexDirection: 'row',
@@ -1377,14 +1388,14 @@ const getStyles = (isDark: boolean) => {
     },
     filterMenu: {
       width: '80%',
-      backgroundColor: '#121214',
+      backgroundColor: bgCard,
       borderRadius: 12,
       padding: 20,
       borderWidth: 1,
-      borderColor: '#007AFF30',
+      borderColor: borderCol,
     },
     filterMenuTitle: {
-      color: '#ffffff',
+      color: textSecondary,
       fontSize: 12,
       fontWeight: '800',
       letterSpacing: 1,
@@ -1397,7 +1408,7 @@ const getStyles = (isDark: boolean) => {
       gap: 12,
       paddingVertical: 12,
       borderBottomWidth: 1,
-      borderBottomColor: '#ffffff08',
+      borderBottomColor: borderCol,
     },
     filterMenuItemActive: {
       backgroundColor: '#2E9BFF10',
@@ -1407,7 +1418,7 @@ const getStyles = (isDark: boolean) => {
       marginRight: -10,
     },
     filterMenuItemText: {
-      color: '#ffffff',
+      color: textPrimary,
       fontSize: 14,
       fontWeight: '500',
     },
@@ -1533,6 +1544,9 @@ const getStyles = (isDark: boolean) => {
       alignItems: 'flex-end',
       justifyContent: 'center',
     },
+    eventRowText: {
+      color: textPrimary,
+    },
     eventProb: {
       color: textPrimary,
       fontSize: 14,
@@ -1602,11 +1616,11 @@ const getStyles = (isDark: boolean) => {
       opacity: 0.8,
     },
     emptyLastEvent: {
-      backgroundColor: '#ffffff05',
+      backgroundColor: isDark ? '#ffffff05' : '#ffffff',
       padding: 16,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: '#ffffff10',
+      borderColor: borderCol,
       alignItems: 'center',
     },
   });

@@ -9,12 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { WORKSPACES } from '../constants/config';
 import { getWorkspacesSummary } from '../services/api'; // <-- NUEVO: Cliente API
+import { Colors } from '../constants/theme';
 
-// ─── Colores del sistema ─────────────────────────────────────────────────────
-const BG       = '#000000';
-const SURFACE  = '#1A1C2C';
-const SURFACE2 = '#25283D';
-const BORDER   = '#ffffff10';
+// Colores del sistema son resueltos dinámicamente usando Colors del theme.ts
 
 // ─── Mini Trend Line (decorativa) ────────────────────────────────────────────
 function TrendLine({ color }: { color: string }) {
@@ -65,6 +62,7 @@ function PulseDot({ color = '#00C853' }: { color?: string }) {
 export default function SuperAdminDashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const { setImpersonatedWorkspace, clearSession, isDarkMode, toggleTheme, workspaceSessions } = useAppStore();
+  const styles = getStyles(isDarkMode);
 
   const [loading, setLoading] = useState(true);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
@@ -135,7 +133,7 @@ export default function SuperAdminDashboard() {
           </View>
           {/* Engranaje — abre settings (incluye logout) */}
           <TouchableOpacity onPress={() => setShowSettings(true)} style={styles.iconBtn}>
-            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="settings-outline" size={22} color={isDarkMode ? 'rgba(255,255,255,0.7)' : '#374151'} />
           </TouchableOpacity>
         </View>
       </View>
@@ -190,24 +188,24 @@ export default function SuperAdminDashboard() {
           <View style={{
             flexDirection: 'row',
             alignItems: 'center',
-            backgroundColor: '#1A1C2C',
+            backgroundColor: isDarkMode ? '#1A1C2C' : '#FFFFFF',
             height: 48,
             borderRadius: 12,
             paddingHorizontal: 15,
             borderWidth: 1,
-            borderColor: '#ffffff15'
+            borderColor: isDarkMode ? '#ffffff15' : '#E5E7EB'
           }}>
-            <Ionicons name="search" size={18} color="#ffffff60" />
+            <Ionicons name="search" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
             <TextInput
               placeholder="Buscar workspace por nombre..."
-              placeholderTextColor="#ffffff30"
-              style={{ flex: 1, color: '#fff', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
+              placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
+              style={{ flex: 1, color: isDarkMode ? '#fff' : '#111827', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
             {searchQuery !== '' && (
               <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="#ffffff60" />
+                <Ionicons name="close-circle" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
               </TouchableOpacity>
             )}
           </View>
@@ -235,7 +233,7 @@ export default function SuperAdminDashboard() {
               const users = instance.metrics?.usersCount !== undefined ? instance.metrics.usersCount : (instance.users || 0);
 
               const onlineColor = '#4caf50';
-              const offlineColor = '#ffffff80';
+              const offlineColor = isDarkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
 
               return (
                 <TouchableOpacity
@@ -262,14 +260,14 @@ export default function SuperAdminDashboard() {
                     <View style={[
                       styles.iconContainer, 
                       { 
-                        backgroundColor: isActive ? '#2E9BFF18' : '#ffffff08',
-                        borderColor: isActive ? '#2E9BFF30' : '#ffffff15'
+                        backgroundColor: isActive ? '#2E9BFF18' : (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                        borderColor: isActive ? '#2E9BFF30' : (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')
                       }
                     ]}>
                       <Ionicons
                         name="business"
                         size={20}
-                        color={isActive ? '#2E9BFF' : '#ffffff60'}
+                        color={isActive ? '#2E9BFF' : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')}
                       />
                     </View>
                     
@@ -308,11 +306,11 @@ export default function SuperAdminDashboard() {
                     {/* Badge de Estado: ACTIVO / INACTIVO */}
                     <View style={[
                       styles.statusBadge,
-                      { backgroundColor: isActive ? '#4caf5015' : '#ffffff08' }
+                      { backgroundColor: isActive ? '#4caf5015' : (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)') }
                     ]}>
                       <View style={[
                         styles.statusDot,
-                        { backgroundColor: isActive ? onlineColor : '#ffffff40' }
+                        { backgroundColor: isActive ? onlineColor : (isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)') }
                       ]} />
                       <Text style={[
                         styles.statusText,
@@ -346,7 +344,7 @@ export default function SuperAdminDashboard() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Configuración</Text>
               <TouchableOpacity onPress={() => setShowSettings(false)}>
-                <Ionicons name="close" size={24} color="rgba(255,255,255,0.5)" />
+                <Ionicons name="close" size={24} color={isDarkMode ? 'rgba(255,255,255,0.5)' : '#374151'} />
               </TouchableOpacity>
             </View>
 
@@ -354,7 +352,7 @@ export default function SuperAdminDashboard() {
               {/* Modo oscuro */}
               <View style={styles.settingRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={[styles.settingIconBox, { backgroundColor: '#1A2440' }]}>
+                  <View style={[styles.settingIconBox, { backgroundColor: isDarkMode ? '#1A2440' : '#E6F4FF' }]}>
                     <Ionicons name={isDarkMode ? 'moon' : 'sunny'} size={18} color="#2E9BFF" />
                   </View>
                   <Text style={styles.settingText}>Modo Oscuro</Text>
@@ -385,149 +383,146 @@ export default function SuperAdminDashboard() {
 }
 
 // ─── Estilos ─────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
+function getStyles(isDarkMode: boolean) {
+  const theme = isDarkMode ? Colors.dark : Colors.light;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: theme.background },
+    header: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 52,
+      paddingBottom: 12,
+      backgroundColor: theme.background
+    },
+    logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    logoIcon: {
+      width: 34, height: 34, borderRadius: 9,
+      backgroundColor: isDarkMode ? '#0D2340' : '#E6F4FF',
+      alignItems: 'center', justifyContent: 'center',
+    },
+    logoText: { color: '#2E9BFF', fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    superBadge: {
+      flexDirection: 'row', alignItems: 'center', gap: 5,
+      backgroundColor: isDarkMode ? '#1A1400' : '#FFF9E6', borderWidth: 1, borderColor: '#FFB30040',
+      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+    },
+    superCrown: { fontSize: 12 },
+    superText: { color: '#FFB300', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+    iconBtn: {
+      width: 36, height: 36, borderRadius: 9,
+      backgroundColor: theme.surfaceSecondary, alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1, borderColor: theme.border,
+    },
 
-  // Header
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 52,
-    paddingBottom: 12,
-  },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logoIcon: {
-    width: 34, height: 34, borderRadius: 9,
-    backgroundColor: '#0D2340',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  logoText: { color: '#2E9BFF', fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  superBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#1A1400', borderWidth: 1, borderColor: '#FFB30040',
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-  },
-  superCrown: { fontSize: 12 },
-  superText: { color: '#FFB300', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
-  iconBtn: {
-    width: 36, height: 36, borderRadius: 9,
-    backgroundColor: SURFACE2, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: BORDER,
-  },
+    scroll: { paddingHorizontal: 16, paddingBottom: 48, gap: 20 },
 
-  // Scroll
-  scroll: { paddingHorizontal: 16, paddingBottom: 48, gap: 20 },
+    statsRow: { flexDirection: 'row', gap: 12 },
+    statCard: {
+      flex: 1, backgroundColor: theme.surface, borderWidth: 1,
+      borderColor: theme.border, borderRadius: 14, padding: 14, gap: 6,
+    },
+    statCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+    statIcon: { width: 36, height: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+    weekBadge: { backgroundColor: isDarkMode ? '#A6E6FF15' : '#E6F7FF', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 },
+    weekText: { color: isDarkMode ? '#A6E6FF' : '#0050B3', fontSize: 10, fontWeight: '600' },
+    statLabel: { color: theme.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginTop: 2 },
+    statValue: { fontSize: 34, fontWeight: '800', letterSpacing: -1 },
 
-  // Stat cards
-  statsRow: { flexDirection: 'row', gap: 12 },
-  statCard: {
-    flex: 1, backgroundColor: SURFACE, borderWidth: 1,
-    borderColor: BORDER, borderRadius: 14, padding: 14, gap: 6,
-  },
-  statCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  statIcon: { width: 36, height: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  weekBadge: { backgroundColor: '#A6E6FF15', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 },
-  weekText: { color: '#A6E6FF', fontSize: 10, fontWeight: '600' },
-  statLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginTop: 2 },
-  statValue: { fontSize: 34, fontWeight: '800', letterSpacing: -1 },
+    sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    sectionTitle: { color: theme.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
 
-  // Section title
-  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionTitle: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', letterSpacing: 1.2 },
+    cardsList: { gap: 14 },
+    card: {
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    cardLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      flex: 1,
+    },
+    iconContainer: {
+      width: 40,
+      height: 40,
+      borderRadius: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+    },
+    cardInfo: {
+      flex: 1,
+    },
+    cardNombre: {
+      color: theme.text,
+      fontSize: 13,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+    },
+    cardSubtitle: {
+      color: theme.textMuted,
+      fontSize: 10,
+      marginTop: 3,
+    },
+    cardRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    typeBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      borderWidth: 1,
+    },
+    typeText: {
+      fontSize: 9,
+      fontWeight: '900',
+      letterSpacing: 0.5,
+    },
+    statusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 20,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    statusText: {
+      fontSize: 11,
+      fontWeight: '600',
+    },
 
-  // Workspace cards (Nuevo estilo consistente con cámaras)
-  cardsList: { gap: 14 },
-  card: {
-    backgroundColor: SURFACE,
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-  cardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  cardInfo: {
-    flex: 1,
-  },
-  cardNombre: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  cardSubtitle: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 10,
-    marginTop: 3,
-  },
-  cardRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  typeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  typeText: {
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalSheet: {
-    backgroundColor: SURFACE, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-    borderWidth: 1, borderColor: BORDER,
-  },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginBottom: 20 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  modalBody: { gap: 8, marginBottom: 28 },
-  settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
-  settingIconBox: { width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  settingText: { color: '#fff', fontSize: 15 },
-  logoutBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: '#F4433615', padding: 14, borderRadius: 12,
-    borderWidth: 1, borderColor: '#F4433640',
-  },
-  logoutText: { color: '#F44336', fontSize: 15, fontWeight: '700' },
-});
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+    modalSheet: {
+      backgroundColor: theme.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+      borderWidth: 1, borderColor: theme.border,
+    },
+    modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: theme.border, alignSelf: 'center', marginBottom: 20 },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+    modalTitle: { color: theme.text, fontSize: 18, fontWeight: '700' },
+    modalBody: { gap: 8, marginBottom: 28 },
+    settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
+    settingIconBox: { width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+    settingText: { color: theme.text, fontSize: 15 },
+    logoutBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+      backgroundColor: '#F4433615', padding: 14, borderRadius: 12,
+      borderWidth: 1, borderColor: '#F4433640',
+    },
+    logoutText: { color: '#F44336', fontSize: 15, fontWeight: '700' },
+  });
+}
