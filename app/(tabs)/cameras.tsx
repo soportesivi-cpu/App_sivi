@@ -18,7 +18,7 @@ import { getDevices, getWorkspacesDevices, getMediaUrl, getWorkspacesEvents } fr
 import { PROD_MEDIA_DOMAIN, WORKSPACES } from '../../constants/config';
 import Loading from '../../components/Loading';
 import { router } from 'expo-router';
-import { Colors } from '../../constants/theme';
+import { Colors, Layout } from '../../constants/theme';
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 
@@ -26,6 +26,7 @@ type Camera = {
   id: number;
   name: string;
   deviceId: string;
+  type?: string;
   stream_name?: string;
   rtsp: string;
   container: any[];
@@ -128,7 +129,8 @@ export default function CamerasScreen() {
 
   const filteredCameras = useMemo(() => {
     return rawCameras.filter(cam => {
-      return cam.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const isIpCam = cam.type?.toUpperCase() === 'IP_CAM';
+      return isIpCam && cam.name.toLowerCase().includes(searchQuery.toLowerCase());
     });
   }, [rawCameras, searchQuery]);
 
@@ -350,7 +352,7 @@ export default function CamerasScreen() {
   }
 
   function getCameraThumbnail(_camera: Camera) {
-    return 'https://images.unsplash.com/photo-1557597774-9d273605dfa9?w=300&q=80';
+    return 'https://plus.unsplash.com/premium_photo-1675016457613-2291390d1bf6?w=300&q=80';
   }
 
   function getThumbnailCaptureHtml(camera: Camera) {
@@ -707,10 +709,10 @@ export default function CamerasScreen() {
       {/* HEADER TOP BAR SIVI */}
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#2E9BFF20', justifyContent: 'center', alignItems: 'center' }}>
-            <Ionicons name="shield-checkmark" size={18} color="#2E9BFF" />
+          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: Colors.brand.celeste + '20', justifyContent: 'center', alignItems: 'center' }}>
+            <Ionicons name="shield-checkmark" size={18} color={Colors.brand.celeste} />
           </View>
-          <Text style={{ color: '#2E9BFF', fontSize: 20, fontWeight: '900', letterSpacing: -1, marginLeft: 10 }}>SIVI</Text>
+          <Text style={{ color: Colors.brand.celeste, fontSize: 20, fontWeight: '900', letterSpacing: -1, marginLeft: 10 }}>SIVI</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity
@@ -728,20 +730,11 @@ export default function CamerasScreen() {
 
 
       <View style={{ paddingHorizontal: 16, marginBottom: 15 }}>
-        <View style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          backgroundColor: isDarkMode ? '#1A1C2C' : '#FFFFFF',
-          height: 48,
-          borderRadius: 12,
-          paddingHorizontal: 15,
-          borderWidth: 1,
-          borderColor: isDarkMode ? '#ffffff15' : '#E5E7EB'
-        }}>
+        <View style={styles.searchBarContainer}>
           <Ionicons name="search" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
           <TextInput
             placeholder="Buscar cámara por nombre..."
-            placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
+            placeholderTextColor={isDarkMode ? Colors.dark.inputPlaceholder : Colors.light.inputPlaceholder}
             style={{ flex: 1, color: isDarkMode ? '#fff' : '#111827', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -833,7 +826,7 @@ export default function CamerasScreen() {
                   <Ionicons
                     name={item.hasMotion ? "warning" : "videocam"}
                     size={20}
-                    color={item.hasMotion ? (isDarkMode ? '#FEAA00' : '#B45309') : online ? '#2E9BFF' : (isDarkMode ? 'rgba(255,255,255,0.4)' : '#4B5563')}
+                    color={item.hasMotion ? (isDarkMode ? '#FEAA00' : '#B45309') : online ? Colors.brand.primary : (isDarkMode ? 'rgba(255,255,255,0.4)' : '#4B5563')}
                   />
                 </View>
                 <View style={styles.cardInfo}>
@@ -861,7 +854,7 @@ export default function CamerasScreen() {
                     {online ? 'CONECTADO' : 'DESCONECTADO'}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={16} color="#2E9BFF" />
+                <Ionicons name="chevron-forward" size={16} color={Colors.brand.primary} />
               </View>
             </TouchableOpacity>
           );
@@ -1038,11 +1031,11 @@ export default function CamerasScreen() {
                 } else if (motive.includes('intrusion') || motive.includes('critical') || motive.includes('error') || motive.includes('motion')) {
                   return { icon: 'walk-outline', color: isDarkMode ? '#F44336' : '#DC2626' };
                 } else if (motive.includes('lpr') || motive.includes('placa') || motive.includes('car')) {
-                  return { icon: 'car-outline', color: isDarkMode ? '#2E9BFF' : '#1D4ED8' };
+                  return { icon: 'car-outline', color: isDarkMode ? Colors.brand.primary : '#1D4ED8' };
                 } else if (motive.includes('objeto') || motive.includes('cube') || motive.includes('arma')) {
                   return { icon: 'cube-outline', color: isDarkMode ? '#FF9800' : '#B45309' };
                 }
-                return { icon: 'shield-checkmark-outline', color: isDarkMode ? '#2E9BFF' : '#1D4ED8' };
+                return { icon: 'shield-checkmark-outline', color: isDarkMode ? Colors.brand.primary : '#1D4ED8' };
               };
 
               const themeStyle = getAnalyticTheme(item.tag || item.motive_categorie || '');
@@ -1173,23 +1166,33 @@ const getStyles = (isDark: boolean) => {
       alignItems: 'center',
     },
     toggleBtnActive: {
-      backgroundColor: '#2E9BFF20',
+      backgroundColor: Colors.brand.primary + '20',
     },
     filterBtn: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: bgCard,
+      backgroundColor: themeColors.inputBg,
       borderWidth: 1,
-      borderColor: borderCol,
+      borderColor: themeColors.inputBorder,
       paddingHorizontal: 12,
       paddingVertical: 6,
-      borderRadius: 4,
+      borderRadius: Layout.borderRadius.input,
     },
     filterBtnText: {
       color: textPrimary,
       fontSize: 12,
       fontWeight: '500',
+    },
+    searchBarContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: themeColors.inputBg,
+      height: Layout.height.input,
+      borderRadius: Layout.borderRadius.input,
+      paddingHorizontal: 15,
+      borderWidth: 1,
+      borderColor: themeColors.inputBorder,
     },
     modeToggleContainer: {
       flexDirection: 'row',
@@ -1206,7 +1209,7 @@ const getStyles = (isDark: boolean) => {
       borderRadius: 6,
     },
     modeToggleActive: {
-      backgroundColor: '#2E9BFF',
+      backgroundColor: Colors.brand.primary,
     },
     modeToggleText: {
       color: toggleText,
@@ -1231,7 +1234,7 @@ const getStyles = (isDark: boolean) => {
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: borderCol,
-      aspectRatio: 16 / 9,
+      aspectRatio: 4 / 3,
       marginBottom: 12,
       shadowColor: isDark ? 'transparent' : '#000000',
       shadowOffset: { width: 0, height: 2 },
@@ -1348,11 +1351,11 @@ const getStyles = (isDark: boolean) => {
       width: 40,
       height: 40,
       borderRadius: 10,
-      backgroundColor: isDark ? '#2196f318' : '#e0f2fe',
+      backgroundColor: isDark ? Colors.brand.primary + '18' : '#e0f2fe',
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1,
-      borderColor: isDark ? '#2196f330' : '#bae6fd',
+      borderColor: isDark ? Colors.brand.primary + '30' : '#bae6fd',
     },
     cardInfo: {
       flex: 1,
@@ -1411,7 +1414,7 @@ const getStyles = (isDark: boolean) => {
       borderBottomColor: borderCol,
     },
     filterMenuItemActive: {
-      backgroundColor: '#2E9BFF10',
+      backgroundColor: Colors.brand.primary + '10',
       borderRadius: 8,
       paddingHorizontal: 10,
       marginLeft: -10,
@@ -1423,7 +1426,7 @@ const getStyles = (isDark: boolean) => {
       fontWeight: '500',
     },
     filterMenuItemTextActive: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontWeight: '700',
     },
     statusText: {
@@ -1456,7 +1459,7 @@ const getStyles = (isDark: boolean) => {
       fontWeight: '700',
     },
     modalSub: {
-      color: '#2196f3',
+      color: Colors.brand.primary,
       fontSize: 11,
       marginTop: 3,
     },
@@ -1531,7 +1534,7 @@ const getStyles = (isDark: boolean) => {
       flex: 1,
     },
     eventTag: {
-      color: '#2196f3',
+      color: Colors.brand.primary,
       fontSize: 11,
       fontWeight: '800',
     },
@@ -1604,7 +1607,7 @@ const getStyles = (isDark: boolean) => {
       backgroundColor: 'rgba(0,0,0,0.7)',
     },
     lastEventTitle: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontSize: 13,
       fontWeight: '900',
       marginBottom: 2,

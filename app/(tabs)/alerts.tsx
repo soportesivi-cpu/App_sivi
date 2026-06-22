@@ -23,7 +23,7 @@ import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
 import { playNotificationSound } from '../../services/sound';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Colors } from '../../constants/theme';
+import { Colors, Layout } from '../../constants/theme';
 
 type Alert = {
   id: number;
@@ -235,7 +235,7 @@ function extractObjectDetection(item: Alert, isDarkMode: boolean = true): Object
     return {
       label: 'OBJETO DETECTADO',
       value: 'PERSONA',
-      color: isDarkMode ? '#2E9BFF' : '#1D4ED8',
+      color: isDarkMode ? Colors.brand.primary : '#1D4ED8',
       icon: '👤'
     };
   }
@@ -367,7 +367,7 @@ function AlertCardItem({
         onPress={() => onPress(item)}
       >
         <View style={styles.gridCardHeader}>
-          <Ionicons name="videocam" size={12} color="#2E9BFF" style={{ marginRight: 2 }} />
+          <Ionicons name="videocam" size={12} color={Colors.brand.primary} style={{ marginRight: 2 }} />
           <Text style={styles.gridCardCamName} numberOfLines={1}>
             {item.device?.name || 'Cámara'}
           </Text>
@@ -436,7 +436,7 @@ function AlertCardItem({
                   : item.is_fp === true
                     ? (isDarkMode ? '#ff9800' : '#B45309')
                     : (isDarkMode ? 'rgba(255, 255, 255, 0.2)' : '#4B5563'))
-                : (isDarkMode ? '#2196f3' : '#1D4ED8')
+                : (isDarkMode ? Colors.brand.primary : '#1D4ED8')
             }
           ]}>
             <Text style={styles.badgeText}>
@@ -987,7 +987,7 @@ export default function AlertsScreen() {
     if (t.includes('zone') || t.includes('zona') || t.includes('intrus') || t.includes('motion') || t.includes('movimiento')) {
       return { color: isDarkMode ? '#ff9800' : '#B45309', icon: 'warning', label: 'INTRUSIÓN' };
     }
-    return { color: isDarkMode ? '#2196f3' : '#1D4ED8', icon: 'scan', label: 'ACTIVO' };
+    return { color: isDarkMode ? Colors.brand.primary : '#1D4ED8', icon: 'scan', label: 'ACTIVO' };
   }
 
   function getEvidenceUrl(item: Alert) {
@@ -1227,7 +1227,7 @@ export default function AlertsScreen() {
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Buscar por cámara o tipo..."
-          placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
+          placeholderTextColor={isDarkMode ? Colors.dark.inputPlaceholder : Colors.light.inputPlaceholder}
           style={styles.searchInput}
           autoCapitalize="none"
           autoCorrect={false}
@@ -1313,7 +1313,7 @@ export default function AlertsScreen() {
         ListFooterComponent={
           loadingMore ? (
             <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-              <ActivityIndicator size="small" color="#2E9BFF" />
+              <ActivityIndicator size="small" color={Colors.brand.primary} />
             </View>
           ) : !hasMore && alerts.length > 0 ? (
             <View style={{ paddingVertical: 20, alignItems: 'center' }}>
@@ -1330,7 +1330,7 @@ export default function AlertsScreen() {
         <Modal transparent={true} visible={true} animationType="fade">
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }}>
             <View style={{ backgroundColor: '#161622', padding: 20, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#ffffff10' }}>
-              <ActivityIndicator size="large" color="#2E9BFF" />
+              <ActivityIndicator size="large" color={Colors.brand.primary} />
               <Text style={{ color: '#fff', marginTop: 10, fontSize: 13, fontWeight: '600' }}>Cargando detalles de alerta...</Text>
             </View>
           </View>
@@ -1552,7 +1552,7 @@ export default function AlertsScreen() {
                           <View style={styles.minutaInputRow}>
                             <TextInput
                               placeholder="Escribe una descripción del incidente..."
-                              placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.4)'}
+                              placeholderTextColor={isDarkMode ? Colors.dark.inputPlaceholder : Colors.light.inputPlaceholder}
                               multiline
                               style={styles.minutaInput}
                               value={noteText}
@@ -1895,9 +1895,9 @@ const getStyles = (isDark: boolean) => {
       flexDirection: 'row',
       alignSelf: 'flex-start',
       alignItems: 'center',
-      backgroundColor: 'rgba(46, 155, 255, 0.08)',
+      backgroundColor: Colors.brand.primary + '12',
       borderWidth: 1,
-      borderColor: 'rgba(46, 155, 255, 0.25)',
+      borderColor: Colors.brand.primary + '30',
       borderRadius: 18,
       paddingHorizontal: 12,
       paddingVertical: 5,
@@ -1907,23 +1907,23 @@ const getStyles = (isDark: boolean) => {
       width: 6,
       height: 6,
       borderRadius: 3,
-      backgroundColor: '#2E9BFF',
+      backgroundColor: Colors.brand.primary,
       marginRight: 6,
     },
     capsuleText: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontSize: 12,
       fontWeight: '700',
     },
     searchBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: bgCardSecondary,
-      borderRadius: 12,
+      backgroundColor: themeColors.inputBg,
+      borderRadius: Layout.borderRadius.input,
       borderWidth: 1,
-      borderColor: borderCol,
+      borderColor: themeColors.inputBorder,
       paddingHorizontal: 15,
-      height: 48,
+      height: Layout.height.input,
       marginHorizontal: 20,
       marginBottom: 20,
     },
@@ -1935,7 +1935,7 @@ const getStyles = (isDark: boolean) => {
       paddingVertical: 8,
     },
     titulo: { color: textPrimary, fontSize: 24, fontWeight: '700' },
-    subtitulo: { color: '#2196f3', fontSize: 13, fontWeight: '500', marginTop: 2 },
+    subtitulo: { color: Colors.brand.primary, fontSize: 13, fontWeight: '500', marginTop: 2 },
     liveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f4433620', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
     liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#f44336' },
     liveText: { color: '#f44336', fontSize: 11, fontWeight: '700' },
@@ -2008,7 +2008,7 @@ const getStyles = (isDark: boolean) => {
       alignItems: 'center',
     },
     gridCardProbValue: {
-      color: isDark ? '#2E9BFF' : '#1D4ED8',
+      color: Colors.brand.primary,
       fontSize: 17.5,
       fontWeight: '900',
     },
@@ -2185,7 +2185,7 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 25,
     },
     infoSectionTitle: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontSize: 14,
       fontWeight: '800',
       letterSpacing: 0.5,
@@ -2305,10 +2305,10 @@ const getStyles = (isDark: boolean) => {
     },
     minutaInput: {
       flex: 1,
-      backgroundColor: isDark ? '#050505' : '#FFFFFF',
+      backgroundColor: themeColors.inputBg,
       borderWidth: 1,
-      borderColor: borderCol,
-      borderRadius: 10,
+      borderColor: themeColors.inputBorder,
+      borderRadius: Layout.borderRadius.input,
       color: textPrimary,
       paddingHorizontal: 12,
       paddingVertical: 8,
@@ -2319,8 +2319,8 @@ const getStyles = (isDark: boolean) => {
     minutaSendBtn: {
       width: 44,
       height: 44,
-      borderRadius: 10,
-      backgroundColor: '#2E9BFF',
+      borderRadius: Layout.borderRadius.input,
+      backgroundColor: Colors.brand.primary,
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -2329,11 +2329,11 @@ const getStyles = (isDark: boolean) => {
       gap: 10,
     },
     sentNoteCard: {
-      backgroundColor: isDark ? '#0d0d0d' : '#F9FAFB',
-      borderRadius: 10,
+      backgroundColor: themeColors.inputBg,
+      borderRadius: Layout.borderRadius.input,
       padding: 12,
       borderWidth: 1,
-      borderColor: borderCol,
+      borderColor: themeColors.inputBorder,
     },
     sentNoteHeader: {
       flexDirection: 'row',
@@ -2342,13 +2342,13 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 6,
     },
     sentNoteUserBadge: {
-      backgroundColor: 'rgba(46, 155, 255, 0.1)',
+      backgroundColor: Colors.brand.primary + '15',
       paddingHorizontal: 6,
       paddingVertical: 2,
       borderRadius: 4,
     },
     sentNoteUserText: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontSize: 9,
       fontWeight: '800',
     },
@@ -2492,7 +2492,7 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 2,
     },
     popupDeviceName: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontSize: 10,
       fontWeight: '800',
       textTransform: 'uppercase',

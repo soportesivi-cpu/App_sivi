@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { useAppStore } from '../services/store';
 import { getDashboard, getWorkspaces } from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import Svg, { Circle, G } from 'react-native-svg';
-import { Colors } from '../constants/theme';
+import { Colors, Layout } from '../constants/theme';
 
 const getTheme = (isDark: boolean) => {
   if (isDark) {
@@ -13,7 +13,7 @@ const getTheme = (isDark: boolean) => {
       background: '#000000',
       surfaceLow: '#1A1C2C', // Azul oscuro grisáceo
       surfaceHigh: '#25283D',
-      primary: '#2E9BFF', // Azul brillante SIVI
+      primary: '#0052FF', // Azul eléctrico
       secondary: '#5AC8FA',
       tertiary: '#F44336', // Rojo de alerta
       warning: '#FF9800', // Naranja falso positivo
@@ -23,7 +23,7 @@ const getTheme = (isDark: boolean) => {
       onSurfaceVariant: '#ffffff', // Blanco puro
       outline: '#ffffff15',
       outlineVariant: '#ffffff',
-      primaryContainer: '#2E9BFF20',
+      primaryContainer: '#0052FF20',
       secondaryContainer: '#5AC8FA',
       error: '#F44336',
     };
@@ -32,7 +32,7 @@ const getTheme = (isDark: boolean) => {
       background: '#F3F4F6',
       surfaceLow: '#FFFFFF', // Blanco para tarjetas
       surfaceHigh: '#F9FAFB',
-      primary: '#2E9BFF',
+      primary: '#0052FF', // Azul eléctrico
       secondary: '#5AC8FA',
       tertiary: '#F44336',
       warning: '#FF9800',
@@ -42,7 +42,7 @@ const getTheme = (isDark: boolean) => {
       onSurfaceVariant: '#374151', // Gris más oscuro para cumplir con contraste WCAG AA 4.5:1
       outline: '#E5E7EB',
       outlineVariant: '#9CA3AF',
-      primaryContainer: '#2E9BFF15',
+      primaryContainer: '#0052FF15',
       secondaryContainer: '#5AC8FA',
       error: '#F44336',
     };
@@ -50,17 +50,41 @@ const getTheme = (isDark: boolean) => {
 };
 
 export default function AdminDashboard() {
-  const { userData, clearSession, impersonatedWorkspace, setImpersonatedWorkspace, activeWorkspace, isHydrated, activeDomain, isDarkMode } = useAppStore();
+  const { userData, clearSession, impersonatedWorkspace, setImpersonatedWorkspace, activeWorkspace, isHydrated, activeDomain, isDarkMode, refreshWorkspacesSessions } = useAppStore();
   const theme = getTheme(isDarkMode);
   const styles = getStyles(isDarkMode);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [selectedInterval, setSelectedInterval] = useState<'hoy' | 'ayer' | 'semana' | '15dias' | '30dias'>('hoy');
 
   const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
   const currentWs = impersonatedWorkspace || activeWorkspace;
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      if (isSuperAdmin && !impersonatedWorkspace) {
+        const res = await refreshWorkspacesSessions();
+        const wsList = await getWorkspaces();
+        setWorkspaces(wsList);
+        if (Platform.OS === 'web') {
+          alert(res.message);
+        } else {
+          Alert.alert('Sincronización', res.message);
+        }
+      } else {
+        const data = await getDashboard(impersonatedWorkspace?.work_id, selectedInterval);
+        setDashboardData(data);
+      }
+    } catch (err) {
+      console.error('Error en el refresco:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   // ─── CÁLCULO DE PORCENTAJES PARA EL DONUT DE CLASIFICACIÓN ──────────────
   const fp = dashboardData?.classification?.falsePositive || 0;
@@ -172,7 +196,19 @@ export default function AdminDashboard() {
           <Text style={{ color: theme.onSurfaceVariant, marginTop: 16 }}>Obteniendo datos...</Text>
         </View>
       ) : workspaces.length > 0 ? (
-        <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.container} 
+          contentContainerStyle={styles.contentContainer} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[theme.primary]}
+              tintColor={theme.primary}
+            />
+          }
+        >
           <Text style={styles.sectionTitle}>WORKSPACES DISPONIBLES</Text>
           {workspaces.map((ws: any) => {
             const workId = ws.work_id || ws.manager_id || ws.id?.toString();
@@ -195,57 +231,56 @@ export default function AdminDashboard() {
           })}
         </ScrollView>
       ) : dashboardData ? (
-        <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.container} 
+          contentContainerStyle={styles.contentContainer} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[theme.primary]}
+              tintColor={theme.primary}
+            />
+          }
+        >
           
           {/* TÍTULO PRINCIPAL DEL DASHBOARD */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 0, marginBottom: 16 }}>
             <Text style={[styles.dashboardTitle, { marginTop: 0, marginBottom: 0 }]}>DASHBOARD</Text>
-            {dashboardData?.isConsolidated && (
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: '#2E9BFF15',
-                borderColor: '#2E9BFF50',
-                borderWidth: 1,
-                paddingHorizontal: 8,
-                paddingVertical: 4,
-                borderRadius: 8,
-                gap: 4
-              }}>
-                <Ionicons name="flash" size={11} color="#2E9BFF" />
-                <Text style={{ color: '#2E9BFF', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 }}>GATEWAY</Text>
-              </View>
-            )}
           </View>
 
-          {/* SELECTOR HORIZONTAL DE INTERVALOS */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.intervalScroll} contentContainerStyle={styles.intervalContent}>
-            {(['hoy', 'ayer', 'semana', '15dias', '30dias'] as const).map((intervalOpt) => {
-              const label = 
-                intervalOpt === 'hoy' ? 'Hoy' :
-                intervalOpt === 'ayer' ? 'Ayer' :
-                intervalOpt === 'semana' ? 'Semana' :
-                intervalOpt === '15dias' ? 'Últimos 15 días' : 'Últimos 30 días';
-              const isSelected = selectedInterval === intervalOpt;
-              return (
-                <TouchableOpacity 
-                  key={intervalOpt} 
-                  onPress={() => setSelectedInterval(intervalOpt)}
-                  style={[
-                    styles.intervalTab, 
-                    isSelected ? styles.intervalTabActive : styles.intervalTabInactive
-                  ]}
-                >
-                  <Text style={[
-                    styles.intervalTabText, 
-                    isSelected ? styles.intervalTabTextActive : styles.intervalTabTextInactive
-                  ]}>
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          {/* SELECTOR DE INTERVALOS ESTILO TABLA ADAPTABLE A TEXTO */}
+          <View style={styles.intervalTableContainer}>
+            <View style={styles.intervalTableRow}>
+              {(['hoy', 'ayer', 'semana', '15dias', '30dias'] as const).map((intervalOpt, index) => {
+                const label = 
+                  intervalOpt === 'hoy' ? 'Hoy' :
+                  intervalOpt === 'ayer' ? 'Ayer' :
+                  intervalOpt === 'semana' ? 'Semana' :
+                  intervalOpt === '15dias' ? 'Últimos 15 días' : 'Últimos 30 días';
+                const isSelected = selectedInterval === intervalOpt;
+                return (
+                  <TouchableOpacity 
+                    key={intervalOpt} 
+                    onPress={() => setSelectedInterval(intervalOpt)}
+                    style={[
+                      styles.intervalTableCell, 
+                      isSelected ? styles.cellActive : styles.cellInactive,
+                      index < 4 && styles.cellRightBorder
+                    ]}
+                  >
+                    <Text style={[
+                      styles.cellText, 
+                      isSelected ? styles.cellTextActive : styles.cellTextInactive
+                    ]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
 
           {/* SECCIÓN TIEMPO DE RESPUESTA DEL OPERADOR */}
           <View style={styles.responseTimeContainer}>
@@ -290,9 +325,6 @@ export default function AdminDashboard() {
                   <Text style={styles.metricCardTitle}>TOTAL ALERTAS</Text>
                   <Text style={styles.metricCardValue}>{dashboardData.metrics?.total || 0}</Text>
                   <Text style={styles.metricCardSub}>Eventos en el intervalo</Text>
-                  <Text style={styles.trendText}>
-                    <Ionicons name="arrow-up" size={11} color="#4ADE80" /> 12% vs ayer
-                  </Text>
                 </View>
               </View>
             </View>
@@ -307,7 +339,6 @@ export default function AdminDashboard() {
                   <Text style={styles.metricCardTitle}>TOTAL ALERTAS ATENDIDAS</Text>
                   <Text style={styles.metricCardValue}>{dashboardData.metrics?.resolved || 0}</Text>
                   <Text style={styles.metricCardSub}>Eventos en el intervalo</Text>
-                  <Text style={styles.trendTextGray}>Sin cambios vs ayer</Text>
                 </View>
               </View>
             </View>
@@ -322,9 +353,6 @@ export default function AdminDashboard() {
                   <Text style={styles.metricCardTitle}>ALERTAS SIN RESOLVER</Text>
                   <Text style={styles.metricCardValue}>{dashboardData.metrics?.unresolved || 0}</Text>
                   <Text style={styles.metricCardSub}>Eventos en el intervalo</Text>
-                  <Text style={styles.trendText}>
-                    <Ionicons name="arrow-up" size={11} color="#4ADE80" /> 12% vs ayer
-                  </Text>
                 </View>
               </View>
             </View>
@@ -336,10 +364,9 @@ export default function AdminDashboard() {
                   <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', fontFamily: 'monospace' }}>%</Text>
                 </View>
                 <View style={styles.metricTextContainer}>
-                  <Text style={styles.metricCardTitle}>PORCENTAJE DE OPERACIÓN EFECTIVA</Text>
+                  <Text style={styles.metricCardTitle}>OPERACIÓN EFECTIVA</Text>
                   <Text style={styles.metricCardValue}>{dashboardData.metrics?.effective || "0%"}</Text>
                   <Text style={styles.metricCardSub}>Eventos en el intervalo</Text>
-                  <Text style={styles.trendTextGray}>Sin cambios vs ayer</Text>
                 </View>
               </View>
             </View>
@@ -394,14 +421,14 @@ export default function AdminDashboard() {
                       />
                     )}
 
-                    {/* Segmento 1: Falso Positivo (Celeste) */}
+                    {/* Segmento 1: Falso Positivo (Azul Eléctrico) */}
                     {fpPct > 0 && (
                       <Circle
                         cx="50"
                         cy="50"
                         r="38"
                         fill="transparent"
-                        stroke="#2E9BFF"
+                        stroke={theme.primary}
                         strokeWidth="10"
                         strokeDasharray="238.76"
                         strokeDashoffset={238.76 - (238.76 * fpPct) / 100}
@@ -421,7 +448,7 @@ export default function AdminDashboard() {
               <View style={styles.legendContainer}>
                 {/* Leyenda 1: Falso Positivo */}
                 <View style={styles.legendRow}>
-                  <View style={[styles.legendDot, { backgroundColor: '#2E9BFF' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: theme.primary }]} />
                   <Text style={styles.legendLabel}>Falso positivo</Text>
                   <Text style={styles.legendValue}>
                     {dashboardData.classification?.falsePositive || 0} ({dashboardData.metrics?.total > 0 ? (((dashboardData.classification?.falsePositive || 0) / dashboardData.metrics?.total) * 100).toFixed(2) : "0.00"}%)
@@ -450,7 +477,7 @@ export default function AdminDashboard() {
           </View>
 
           {/* ÚLTIMAS ALERTAS LIST (Limitado a 5 alertas más recientes) */}
-          <View style={[styles.rowCenter, { justifyContent: 'space-between', marginTop: 28, marginBottom: 12 }]}>
+          <View style={[styles.rowCenter, { justifyContent: 'space-between', marginTop: 5, marginBottom: 12 }]}>
             <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, fontSize: 13 }]}>ÚLTIMAS ALERTAS (24H)</Text>
             <TouchableOpacity onPress={() => router.push('/(tabs)/alerts')}>
               <Text style={{ color: theme.primary, fontSize: 12, fontWeight: '600' }}>Ver todas</Text>
@@ -501,6 +528,7 @@ export default function AdminDashboard() {
 
 const getStyles = (isDark: boolean) => {
   const theme = getTheme(isDark);
+  const themeColors = isDark ? Colors.dark : Colors.light;
   return StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -775,52 +803,64 @@ const getStyles = (isDark: boolean) => {
     marginTop: 10,
     marginBottom: 16,
   },
-  intervalScroll: {
-    marginBottom: 20,
-    flexDirection: 'row',
-  },
-  intervalContent: {
-    gap: 8,
-  },
-  intervalTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  intervalTabActive: {
-    backgroundColor: theme.primary,
-    borderColor: theme.primary,
-  },
-  intervalTabInactive: {
+  intervalTableContainer: {
     backgroundColor: theme.surfaceLow,
+    borderRadius: Layout.borderRadius.card,
+    borderWidth: 1,
     borderColor: theme.outline,
+    overflow: 'hidden',
+    marginBottom: 8,
   },
-  intervalTabText: {
+  intervalTableRow: {
+    flexDirection: 'row',
+    width: '100%',
+    alignItems: 'stretch',
+  },
+  intervalTableCell: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 'auto',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  cellActive: {
+    backgroundColor: Colors.brand.primary,
+  },
+  cellInactive: {
+    backgroundColor: 'transparent',
+  },
+  cellRightBorder: {
+    borderRightWidth: 1,
+    borderRightColor: theme.outline,
+  },
+  cellText: {
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: '900',
+    textAlign: 'center',
   },
-  intervalTabTextActive: {
+  cellTextActive: {
     color: '#FFFFFF',
   },
-  intervalTabTextInactive: {
+  cellTextInactive: {
     color: theme.onSurfaceVariant,
   },
   metricCard: {
     width: '48.5%',
-    borderRadius: 12,
+    borderRadius: Layout.borderRadius.card,
     paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderWidth: 1,
     marginBottom: 4,
   },
   metricCardBlue: {
-    backgroundColor: isDark ? '#0B305C' : '#E0F2FE',
-    borderColor: isDark ? '#2E9BFF30' : '#93C5FD',
+    backgroundColor: themeColors.kpiBlueBg,
+    borderColor: themeColors.kpiBlueBorder,
   },
   metricCardRed: {
-    backgroundColor: isDark ? '#5C1A1A' : '#FEE2E2',
-    borderColor: isDark ? '#EF444430' : '#FCA5A5',
+    backgroundColor: themeColors.kpiRedBg,
+    borderColor: themeColors.kpiRedBorder,
   },
   metricCardHeader: {
     flexDirection: 'row',
@@ -843,7 +883,7 @@ const getStyles = (isDark: boolean) => {
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 4,
     textTransform: 'uppercase',
   },
   metricCardValue: {
@@ -870,18 +910,20 @@ const getStyles = (isDark: boolean) => {
   },
   classificationContainer: {
     backgroundColor: theme.surfaceLow,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: Layout.borderRadius.card,
+    paddingTop: 12,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: theme.outline,
-    marginBottom: 20,
+    marginBottom: 10,
   },
   classificationTitle: {
     color: theme.onSurfaceVariant,
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 0.5,
-    marginBottom: 16,
+    marginBottom: 10,
     textTransform: 'uppercase',
   },
   classificationBody: {
@@ -891,7 +933,7 @@ const getStyles = (isDark: boolean) => {
   },
   donutWrapper: {
     width: 120,
-    height: 120,
+    height: 110,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -951,7 +993,7 @@ const getStyles = (isDark: boolean) => {
   },
   responseTimeContainer: {
     backgroundColor: theme.surfaceLow,
-    borderRadius: 12,
+    borderRadius: Layout.borderRadius.card,
     padding: 16,
     borderWidth: 1,
     borderColor: theme.outline,

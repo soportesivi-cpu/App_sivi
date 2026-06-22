@@ -23,7 +23,7 @@ export default function TabsLayout() {
           paddingTop: 10,
           display: restrictAccess ? 'none' : 'flex', // Ocultamos la barra completa si no hay workspace
         },
-        tabBarActiveTintColor: Colors.brand.primary,
+        tabBarActiveTintColor: Colors.brand.celeste,
         tabBarInactiveTintColor: themeColors.textMuted,
         tabBarLabelStyle: {
           fontSize: 10,

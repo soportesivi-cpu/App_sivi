@@ -279,3 +279,28 @@ export class AlertSocketService {
 
 // Instancia singleton para toda la app
 export const wsService = new AlertSocketService();
+
+// Suscripción reactiva para re-conexión automática de sockets en caliente ante cambios de sesión o workspaces
+let lastSessions = useAppStore.getState().workspaceSessions;
+let lastActive = useAppStore.getState().activeWorkspace;
+let lastImpersonated = useAppStore.getState().impersonatedWorkspace;
+
+useAppStore.subscribe((state) => {
+  const currentSessions = state.workspaceSessions;
+  const currentActive = state.activeWorkspace;
+  const currentImpersonated = state.impersonatedWorkspace;
+
+  if (
+    currentSessions !== lastSessions ||
+    currentActive !== lastActive ||
+    currentImpersonated !== lastImpersonated
+  ) {
+    console.log('[WS-TRIGGER] Sincronización detectada en el Store de Zustand. Re-conectando sockets...');
+    lastSessions = currentSessions;
+    lastActive = currentActive;
+    lastImpersonated = currentImpersonated;
+
+    wsService.disconnect();
+    wsService.connect();
+  }
+});

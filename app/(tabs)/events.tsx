@@ -18,7 +18,7 @@ import { getAlarms } from '../../services/api';
 import { useAppStore } from '../../services/store';
 import { wsService } from '../../services/websocket';
 import Loading from '../../components/Loading';
-import { Colors } from '../../constants/theme';
+import { Colors, Layout } from '../../constants/theme';
 
 interface EventItem {
   id: number | string;
@@ -57,6 +57,7 @@ export default function EventsScreen() {
   const isFocused = useIsFocused();
   const { activeDomain: domain, activeWorkspace, impersonatedWorkspace, workspaceSessions, isDarkMode } = useAppStore();
   const styles = getStyles(isDarkMode);
+  const themeColors = isDarkMode ? Colors.dark : Colors.light;
   const [searchQuery, setSearchQuery] = useState('');
 
   // Dynamic Workspace Name Resolution
@@ -185,13 +186,13 @@ export default function EventsScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.logoBox}>
-            <Ionicons name="shield" size={18} color="#0097FF" />
+            <Ionicons name="shield" size={18} color={Colors.brand.celeste} />
           </View>
           <Text style={styles.logoText}>SIVI</Text>
         </View>
         <TouchableOpacity style={styles.headerBtn} onPress={() => refetch()} activeOpacity={0.7}>
           {isFetching ? (
-            <ActivityIndicator size="small" color="#0097FF" />
+            <ActivityIndicator size="small" color={Colors.brand.celeste} />
           ) : (
             <Ionicons name="refresh" size={20} color="#fff" />
           )}
@@ -203,7 +204,7 @@ export default function EventsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.mainTitle}>Eventos Inteligentes</Text>
           <View style={styles.workspaceContainer}>
-            <Ionicons name="business" size={14} color="#0097FF" style={{ marginRight: 5 }} />
+            <Ionicons name="business" size={14} color={Colors.brand.celeste} style={{ marginRight: 5 }} />
             <Text style={styles.workspaceText}>{workspaceName}</Text>
           </View>
         </View>
@@ -213,7 +214,7 @@ export default function EventsScreen() {
             <Ionicons name="search" size={16} color={isDarkMode ? '#ffffff60' : '#4B5563'} style={styles.searchIcon} />
             <TextInput
               placeholder="Buscar regla por nombre..."
-              placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
+              placeholderTextColor={themeColors.inputPlaceholder}
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -227,7 +228,7 @@ export default function EventsScreen() {
         {filteredEvents.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconBox}>
-              <Ionicons name="notifications-off-outline" size={32} color="#0097FF" />
+              <Ionicons name="notifications-off-outline" size={32} color={Colors.brand.primary} />
             </View>
             <Text style={styles.emptyText}>Sin eventos configurados</Text>
             <Text style={styles.emptySubtext}>
@@ -245,7 +246,7 @@ export default function EventsScreen() {
               {/* Contenido Izquierdo */}
               <View style={styles.cardLeft}>
                 <View style={styles.iconBoxCamera}>
-                  <Ionicons name="notifications" size={18} color="#0097FF" />
+                  <Ionicons name="notifications" size={18} color={Colors.brand.primary} />
                 </View>
                 <View style={styles.cardInfo}>
                   <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
@@ -266,7 +267,7 @@ export default function EventsScreen() {
                     {event.active ? 'ACTIVO' : 'INACTIVO'}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={16} color="#0097FF" />
+                <Ionicons name="chevron-forward" size={16} color={Colors.brand.primary} />
               </View>
             </TouchableOpacity>
           ))
@@ -291,26 +292,26 @@ const getStyles = (isDark: boolean) => {
       backgroundColor: themeColors.background
     },
     headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    logoBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#0097FF15', justifyContent: 'center', alignItems: 'center' },
-    logoText: { color: '#0097FF', fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
+    logoBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.brand.celeste + '15', justifyContent: 'center', alignItems: 'center' },
+    logoText: { color: Colors.brand.celeste, fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
     headerBtn: { padding: 8 },
 
     scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
     titleRow: { marginTop: 10, marginBottom: 18 },
     mainTitle: { color: themeColors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
     workspaceContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-    workspaceText: { color: '#0097FF', fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
+    workspaceText: { color: Colors.brand.celeste, fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
 
     searchSection: { marginBottom: 20 },
     searchBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: themeColors.surfaceSecondary,
-      borderRadius: 12,
+      backgroundColor: themeColors.inputBg,
+      borderRadius: Layout.borderRadius.input,
       paddingHorizontal: 14,
       borderWidth: 1,
-      borderColor: themeColors.border,
-      height: 48
+      borderColor: themeColors.inputBorder,
+      height: Layout.height.input
     },
     searchIcon: { marginRight: 10 },
     searchInput: { flex: 1, color: themeColors.text, fontSize: 14 },
@@ -320,10 +321,10 @@ const getStyles = (isDark: boolean) => {
       alignItems: 'center',
       justifyContent: 'space-between',
       backgroundColor: themeColors.surface,
-      borderRadius: 12,
+      borderRadius: Layout.borderRadius.card,
       marginBottom: 12,
       borderLeftWidth: 4,
-      borderLeftColor: '#0097FF',
+      borderLeftColor: Colors.brand.primary,
       paddingVertical: 14,
       paddingHorizontal: 14,
       borderWidth: 1,
@@ -339,7 +340,7 @@ const getStyles = (isDark: boolean) => {
       width: 42,
       height: 42,
       borderRadius: 10,
-      backgroundColor: '#0097FF15',
+      backgroundColor: Colors.brand.primary + '15',
       justifyContent: 'center',
       alignItems: 'center',
       marginRight: 12
@@ -361,15 +362,15 @@ const getStyles = (isDark: boolean) => {
       fontWeight: '800'
     },
     typeBadge: {
-      backgroundColor: '#0097FF15',
+      backgroundColor: Colors.brand.primary + '15',
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: 6,
       borderWidth: 1,
-      borderColor: '#0097FF30'
+      borderColor: Colors.brand.primary + '30'
     },
     typeBadgeText: {
-      color: '#0097FF',
+      color: Colors.brand.primary,
       fontSize: 9,
       fontWeight: '900'
     },
@@ -417,7 +418,7 @@ const getStyles = (isDark: boolean) => {
       width: 64,
       height: 64,
       borderRadius: 32,
-      backgroundColor: '#0097FF10',
+      backgroundColor: Colors.brand.primary + '10',
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 16

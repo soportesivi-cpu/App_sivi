@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
 import { getDevices, searchForense, getWorkspacesDevices, confirmAlert, falsePositiveAlert } from '../../services/api';
-import { Colors } from '../../constants/theme';
+import { Colors, Layout } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -32,7 +32,7 @@ const FilterBox = ({ label, value, icon, onPress }: { label: string, value: stri
       <Text style={styles.filterLabel}>{label}</Text>
       <View style={styles.filterBox}>
         <Text style={styles.filterValue} numberOfLines={1}>{value}</Text>
-        <Ionicons name={icon as any} size={16} color="#2E9BFF" />
+        <Ionicons name={icon as any} size={16} color={Colors.brand.primary} />
       </View>
     </TouchableOpacity>
   );
@@ -194,11 +194,11 @@ const CustomTimePicker = React.memo(({ type, currentHour, currentMin, onSelect }
         {/* Selector de Horas */}
         <View style={styles.timeUnitCol}>
           <TouchableOpacity onPress={() => adjustTime('hour', 'up')} style={styles.arrowBtn}>
-            <Ionicons name="chevron-up" size={18} color="#2E9BFF" />
+            <Ionicons name="chevron-up" size={18} color={Colors.brand.primary} />
           </TouchableOpacity>
           <Text style={styles.timeValueText}>{currentHour}</Text>
           <TouchableOpacity onPress={() => adjustTime('hour', 'down')} style={styles.arrowBtn}>
-            <Ionicons name="chevron-down" size={18} color="#2E9BFF" />
+            <Ionicons name="chevron-down" size={18} color={Colors.brand.primary} />
           </TouchableOpacity>
         </View>
 
@@ -207,11 +207,11 @@ const CustomTimePicker = React.memo(({ type, currentHour, currentMin, onSelect }
         {/* Selector de Minutos */}
         <View style={styles.timeUnitCol}>
           <TouchableOpacity onPress={() => adjustTime('min', 'up')} style={styles.arrowBtn}>
-            <Ionicons name="chevron-up" size={18} color="#2E9BFF" />
+            <Ionicons name="chevron-up" size={18} color={Colors.brand.primary} />
           </TouchableOpacity>
           <Text style={styles.timeValueText}>{currentMin}</Text>
           <TouchableOpacity onPress={() => adjustTime('min', 'down')} style={styles.arrowBtn}>
-            <Ionicons name="chevron-down" size={18} color="#2E9BFF" />
+            <Ionicons name="chevron-down" size={18} color={Colors.brand.primary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -620,11 +620,11 @@ const DetailMetaItem = ({ icon, label, value, highlight }: { icon: string; label
   return (
     <View style={styles.detailMetaItem}>
       <View style={styles.detailMetaIcon}>
-        <Ionicons name={icon as any} size={14} color={highlight ? '#2E9BFF' : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')} />
+        <Ionicons name={icon as any} size={14} color={highlight ? Colors.brand.primary : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.detailMetaLabel}>{label}</Text>
-        <Text style={[styles.detailMetaValue, highlight && { color: '#2E9BFF' }]} numberOfLines={1}>{value}</Text>
+        <Text style={[styles.detailMetaValue, highlight && { color: Colors.brand.primary }]} numberOfLines={1}>{value}</Text>
       </View>
     </View>
   );
@@ -633,6 +633,7 @@ const DetailMetaItem = ({ icon, label, value, highlight }: { icon: string; label
 export default function SearchScreen() {
   const { activeDomain: domain, workspaceSessions, activeWorkspace, impersonatedWorkspace, isDarkMode } = useAppStore();
   const styles = getStyles(isDarkMode);
+  const theme = isDarkMode ? Colors.dark : Colors.light;
   const currentWs = impersonatedWorkspace || activeWorkspace;
   const currentWsName = currentWs?.id || currentWs?.workspace || '';
 
@@ -826,7 +827,7 @@ function normalizarTexto(texto: string): string {
     if (loadingMore) {
       return (
         <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-          <ActivityIndicator size="small" color="#2E9BFF" />
+          <ActivityIndicator size="small" color={Colors.brand.primary} />
         </View>
       );
     }
@@ -844,7 +845,7 @@ function normalizarTexto(texto: string): string {
     if (loadingResults) {
       return (
         <View style={{ paddingVertical: 50, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator size="large" color="#2E9BFF" />
+          <ActivityIndicator size="large" color={Colors.brand.primary} />
           <Text style={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)', fontSize: 13, fontWeight: '600', marginTop: 15 }}>Buscando detecciones...</Text>
         </View>
       );
@@ -889,10 +890,10 @@ function normalizarTexto(texto: string): string {
       {/* TOP BAR SIVI */}
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#2E9BFF20', justifyContent: 'center', alignItems: 'center' }}>
-            <Ionicons name="shield-checkmark" size={18} color="#2E9BFF" />
+          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: Colors.brand.celeste + '20', justifyContent: 'center', alignItems: 'center' }}>
+            <Ionicons name="shield-checkmark" size={18} color={Colors.brand.celeste} />
           </View>
-          <Text style={{ color: '#2E9BFF', fontSize: 20, fontWeight: '900', letterSpacing: -1, marginLeft: 10 }}>SIVI</Text>
+          <Text style={{ color: Colors.brand.celeste, fontSize: 20, fontWeight: '900', letterSpacing: -1, marginLeft: 10 }}>SIVI</Text>
         </View>
       </View>
 
@@ -913,10 +914,10 @@ function normalizarTexto(texto: string): string {
             {/* SEARCH BAR */}
             <View style={styles.searchSection}>
                <View style={styles.searchBar}>
-                  <Ionicons name="search" size={18} color={isDarkMode ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)'} />
+                  <Ionicons name="search" size={18} color={theme.inputPlaceholder} />
                   <TextInput 
                     placeholder="Buscar por ID, placa, o notas..." 
-                    placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'}
+                    placeholderTextColor={theme.inputPlaceholder}
                     style={styles.searchInput}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
@@ -969,7 +970,7 @@ function normalizarTexto(texto: string): string {
                   onPress={() => { setSelectedAnalytic(type); setActiveModal(null); }}
                 >
                    <Text style={[styles.modalItemText, selectedAnalytic === type && styles.modalItemTextActive]}>{type}</Text>
-                   {selectedAnalytic === type && <Ionicons name="checkmark-circle" size={20} color="#2E9BFF" />}
+                   {selectedAnalytic === type && <Ionicons name="checkmark-circle" size={20} color={Colors.brand.primary} />}
                 </TouchableOpacity>
               ))}
             </SelectionModal>
@@ -980,7 +981,7 @@ function normalizarTexto(texto: string): string {
               onClose={() => setActiveModal(null)}
             >
               {camsLoading ? (
-                <ActivityIndicator color="#2E9BFF" style={{ marginVertical: 20 }} />
+                <ActivityIndicator color={Colors.brand.primary} style={{ marginVertical: 20 }} />
               ) : (
                 <>
                   <TouchableOpacity 
@@ -988,7 +989,7 @@ function normalizarTexto(texto: string): string {
                     onPress={() => setSelectedCameras([])}
                   >
                      <Text style={[styles.modalItemText, selectedCameras.length === 0 && styles.modalItemTextActive]}>Todas las cámaras</Text>
-                     {selectedCameras.length === 0 && <Ionicons name="checkmark-circle" size={20} color="#2E9BFF" />}
+                     {selectedCameras.length === 0 && <Ionicons name="checkmark-circle" size={20} color={Colors.brand.primary} />}
                   </TouchableOpacity>
                   {cameras.map((cam: any) => {
                     const isSelected = selectedCameras.includes(cam.id);
@@ -1002,7 +1003,7 @@ function normalizarTexto(texto: string): string {
                         }}
                       >
                          <Text style={[styles.modalItemText, isSelected && styles.modalItemTextActive]}>{cam.name}</Text>
-                         {isSelected && <Ionicons name="checkmark-circle" size={20} color="#2E9BFF" />}
+                         {isSelected && <Ionicons name="checkmark-circle" size={20} color={Colors.brand.primary} />}
                       </TouchableOpacity>
                     );
                   })}
@@ -1056,13 +1057,13 @@ function normalizarTexto(texto: string): string {
                     style={[styles.toggleBtn, viewMode === 'grid' && styles.toggleBtnActive]}
                     onPress={() => setViewMode('grid')}
                   >
-                     <Ionicons name="grid" size={16} color={viewMode === 'grid' ? "#2E9BFF" : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')} />
+                     <Ionicons name="grid" size={16} color={viewMode === 'grid' ? Colors.brand.primary : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')} />
                   </TouchableOpacity>
                   <TouchableOpacity 
                     style={[styles.toggleBtn, viewMode === 'list' && styles.toggleBtnActive]}
                     onPress={() => setViewMode('list')}
                   >
-                     <Ionicons name="list" size={16} color={viewMode === 'list' ? "#2E9BFF" : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')} />
+                     <Ionicons name="list" size={16} color={viewMode === 'list' ? Colors.brand.primary : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')} />
                   </TouchableOpacity>
                </View>
             </View>
@@ -1110,21 +1111,21 @@ function getStyles(isDarkMode: boolean) {
     scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
     
     searchSection: { marginTop: 24, marginBottom: 15 },
-    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, height: 52, borderRadius: 12, paddingHorizontal: 15, borderWidth: 1, borderColor: theme.border },
+    searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.inputBg, height: Layout.height.input, borderRadius: Layout.borderRadius.input, paddingHorizontal: 15, borderWidth: 1, borderColor: theme.inputBorder },
     searchInput: { flex: 1, color: theme.text, fontSize: 14, marginLeft: 10, fontWeight: '500' },
 
     filterGrid: { gap: 12, marginBottom: 20 },
     filterRow: { flexDirection: 'row', gap: 12 },
     filterBoxContainer: { flex: 1, gap: 8 },
     filterLabel: { color: isDarkMode ? '#E0E0E0' : '#374151', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginLeft: 2, textTransform: 'uppercase' },
-    filterBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.surface, height: 48, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.border },
+    filterBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.inputBg, height: Layout.height.input, borderRadius: Layout.borderRadius.input, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.inputBorder },
     filterValue: { color: theme.text, fontSize: 13, fontWeight: '700' },
 
     workspaceSelectorContainer: { marginBottom: 15, gap: 8 },
-    workspaceSelectorBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.surface, height: 48, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.border },
+    workspaceSelectorBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.inputBg, height: Layout.height.input, borderRadius: Layout.borderRadius.input, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.inputBorder },
     workspaceSelectorValue: { color: theme.text, fontSize: 13, fontWeight: '700' },
 
-    executeBtn: { backgroundColor: '#2E9BFF', height: 58, borderRadius: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 25, shadowColor: '#2E9BFF', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
+    executeBtn: { backgroundColor: Colors.brand.primary, height: 58, borderRadius: Layout.borderRadius.input, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 25, shadowColor: Colors.brand.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
     executeBtnText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
 
     resultsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingTop: 10 },
@@ -1141,7 +1142,7 @@ function getStyles(isDarkMode: boolean) {
     resThumbSmall: { width: 120, height: '100%' },
     thumbOverlay: { ...StyleSheet.absoluteFillObject, padding: 8, justifyContent: 'space-between', flexDirection: 'row' },
     camBadge: { backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, height: 20, borderWidth: 0.5, borderColor: '#ffffff20' },
-    camBadgeText: { color: '#2E9BFF', fontSize: 11, fontWeight: '900' },
+    camBadgeText: { color: Colors.brand.primary, fontSize: 11, fontWeight: '900' },
     confBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, height: 20 },
     confHigh: { backgroundColor: '#4CAF50' },
     confMid: { backgroundColor: '#FF9800' },
@@ -1160,9 +1161,9 @@ function getStyles(isDarkMode: boolean) {
     modalTitle: { color: theme.text, fontSize: 18, fontWeight: '900', letterSpacing: 0.5 },
     modalBody: { paddingHorizontal: 10 },
     modalItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, marginHorizontal: 10, borderRadius: 15, marginBottom: 5 },
-    modalItemActive: { backgroundColor: '#2E9BFF15' },
+    modalItemActive: { backgroundColor: Colors.brand.primary + '15' },
     modalItemText: { color: theme.textSecondary, fontSize: 15, fontWeight: '600' },
-    modalItemTextActive: { color: '#2E9BFF', fontWeight: '800' },
+    modalItemTextActive: { color: Colors.brand.primary, fontWeight: '800' },
     timeInput: { backgroundColor: theme.surface, color: theme.text, padding: 15, borderRadius: 12, fontSize: 18, fontWeight: '800', textAlign: 'center', borderWidth: 1, borderColor: theme.border },
 
     // Estilos de Calendario
@@ -1173,9 +1174,9 @@ function getStyles(isDarkMode: boolean) {
     weekDayText: { color: theme.textMuted, fontSize: 12, fontWeight: '800', width: (width - 80) / 7, textAlign: 'center' },
     daysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
     dayBox: { width: (width - 80) / 7, height: 45, justifyContent: 'center', alignItems: 'center', marginBottom: 5 },
-    dayBoxSelected: { backgroundColor: '#2E9BFF30' },
-    dayBoxStart: { backgroundColor: '#2E9BFF', borderTopLeftRadius: 10, borderBottomLeftRadius: 10 },
-    dayBoxEnd: { backgroundColor: '#2E9BFF', borderTopRightRadius: 10, borderBottomRightRadius: 10 },
+    dayBoxSelected: { backgroundColor: Colors.brand.primary + '30' },
+    dayBoxStart: { backgroundColor: Colors.brand.primary, borderTopLeftRadius: 10, borderBottomLeftRadius: 10 },
+    dayBoxEnd: { backgroundColor: Colors.brand.primary, borderTopRightRadius: 10, borderBottomRightRadius: 10 },
     dayText: { color: theme.text, fontSize: 14, fontWeight: '600' },
     dayTextActive: { color: '#fff', fontWeight: '900' },
 
@@ -1202,12 +1203,12 @@ function getStyles(isDarkMode: boolean) {
     timeUnitCol: {
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.surface,
-      borderRadius: 10,
+      backgroundColor: theme.inputBg,
+      borderRadius: Layout.borderRadius.input,
       width: 48,
       paddingVertical: 2,
       borderWidth: 1,
-      borderColor: theme.border,
+      borderColor: theme.inputBorder,
     },
     arrowBtn: {
       paddingHorizontal: 12,
@@ -1216,7 +1217,7 @@ function getStyles(isDarkMode: boolean) {
       alignItems: 'center',
     },
     timeValueText: {
-      color: '#2E9BFF',
+      color: Colors.brand.primary,
       fontSize: 16,
       fontWeight: '900',
       marginVertical: 1,
@@ -1229,8 +1230,8 @@ function getStyles(isDarkMode: boolean) {
     },
 
     // Badge de sucursal en tarjetas
-    workspaceBadge: { backgroundColor: '#2E9BFF15', borderColor: '#2E9BFF30', borderWidth: 0.5, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-    workspaceBadgeText: { color: '#2E9BFF', fontSize: 8, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+    workspaceBadge: { backgroundColor: Colors.brand.primary + '15', borderColor: Colors.brand.primary + '30', borderWidth: 0.5, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+    workspaceBadgeText: { color: Colors.brand.primary, fontSize: 8, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
 
     // Modal de Detalle de Resultado
     detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
@@ -1249,8 +1250,8 @@ function getStyles(isDarkMode: boolean) {
     detailMetaIcon: { width: 30, height: 30, borderRadius: 8, backgroundColor: theme.surfaceSecondary, justifyContent: 'center', alignItems: 'center' },
     detailMetaLabel: { color: theme.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
     detailMetaValue: { color: theme.text, fontSize: 14, fontWeight: '700' },
-    tagChip: { backgroundColor: '#2E9BFF15', borderWidth: 1, borderColor: '#2E9BFF30', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-    tagChipText: { color: '#2E9BFF', fontSize: 12, fontWeight: '700' },
+    tagChip: { backgroundColor: Colors.brand.primary + '15', borderWidth: 1, borderColor: Colors.brand.primary + '30', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+    tagChipText: { color: Colors.brand.primary, fontSize: 12, fontWeight: '700' },
     detailActions: { flexDirection: 'row', gap: 12, marginBottom: 40, marginTop: 8 },
     detailActionBtn: { flex: 1, height: 52, borderRadius: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
     detailActionConfirm: { backgroundColor: '#4CAF50' },

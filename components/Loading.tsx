@@ -1,9 +1,10 @@
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { Colors } from '../constants/theme';
 
 export default function Loading() {
   return (
     <View style={styles.centrado}>
-      <ActivityIndicator size="large" color="#2196f3" />
+      <ActivityIndicator size="large" color={Colors.brand.primary} />
     </View>
   );
 }

@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { WORKSPACES } from '../constants/config';
 import { getWorkspacesSummary } from '../services/api'; // <-- NUEVO: Cliente API
-import { Colors } from '../constants/theme';
+import { Colors, Layout } from '../constants/theme';
 
 // Colores del sistema son resueltos dinámicamente usando Colors del theme.ts
 
@@ -63,6 +63,7 @@ export default function SuperAdminDashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const { setImpersonatedWorkspace, clearSession, isDarkMode, toggleTheme, workspaceSessions } = useAppStore();
   const styles = getStyles(isDarkMode);
+  const theme = isDarkMode ? Colors.dark : Colors.light;
 
   const [loading, setLoading] = useState(true);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
@@ -148,18 +149,18 @@ export default function SuperAdminDashboard() {
         <View style={styles.statsRow}>
 
           {/* Total Workspaces */}
-          <View style={[styles.statCard, { borderColor: '#2E9BFF30' }]}>
+          <View style={[styles.statCard, { borderColor: Colors.brand.primary + '30' }]}>
             <View style={styles.statCardTop}>
-              <View style={[styles.statIcon, { backgroundColor: '#0D2340' }]}>
-                <Ionicons name="business" size={18} color="#2E9BFF" />
+              <View style={[styles.statIcon, { backgroundColor: isDarkMode ? Colors.brand.primary + '18' : '#E6F4FF' }]}>
+                <Ionicons name="business" size={18} color={Colors.brand.primary} />
               </View>
               <View style={styles.weekBadge}>
                 <Text style={styles.weekText}>+{stats.newThisWeek} esta semana</Text>
               </View>
             </View>
             <Text style={styles.statLabel}>TOTAL WORKSPACES</Text>
-            <Text style={[styles.statValue, { color: '#2E9BFF' }]}>{stats.totalWorkspaces}</Text>
-            <TrendLine color="#2E9BFF" />
+            <Text style={[styles.statValue, { color: Colors.brand.primary }]}>{stats.totalWorkspaces}</Text>
+            <TrendLine color={Colors.brand.primary} />
           </View>
 
           {/* Cámaras Online */}
@@ -179,33 +180,24 @@ export default function SuperAdminDashboard() {
 
         {/* ── SECCIÓN TITLE ── */}
         <View style={styles.sectionRow}>
-          <Ionicons name="layers" size={16} color="#2E9BFF" />
+          <Ionicons name="layers" size={16} color={Colors.brand.primary} />
           <Text style={styles.sectionTitle}>TOTAL DE WORKSPACES</Text>
         </View>
 
         {/* SEARCH BAR (Búsqueda de Workspaces) */}
         <View style={{ paddingHorizontal: 0, marginBottom: 5 }}>
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: isDarkMode ? '#1A1C2C' : '#FFFFFF',
-            height: 48,
-            borderRadius: 12,
-            paddingHorizontal: 15,
-            borderWidth: 1,
-            borderColor: isDarkMode ? '#ffffff15' : '#E5E7EB'
-          }}>
-            <Ionicons name="search" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
+          <View style={styles.searchBarContainer}>
+            <Ionicons name="search" size={18} color={theme.textMuted} />
             <TextInput
               placeholder="Buscar workspace por nombre..."
-              placeholderTextColor={isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.5)'}
-              style={{ flex: 1, color: isDarkMode ? '#fff' : '#111827', fontSize: 14, marginLeft: 10, fontWeight: '500' }}
+              placeholderTextColor={theme.inputPlaceholder}
+              style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
             {searchQuery !== '' && (
               <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color={isDarkMode ? '#ffffff60' : '#4B5563'} />
+                <Ionicons name="close-circle" size={18} color={theme.textMuted} />
               </TouchableOpacity>
             )}
           </View>
@@ -214,7 +206,7 @@ export default function SuperAdminDashboard() {
         {/* ── WORKSPACE CARDS ── */}
         <View style={styles.cardsList}>
           {loading ? (
-            <ActivityIndicator size="large" color="#2E9BFF" style={{ marginTop: 32 }} />
+            <ActivityIndicator size="large" color={Colors.brand.primary} style={{ marginTop: 32 }} />
           ) : (
             workspaces.filter(ws => {
               const name = ws.workspace || ws.name || '';
@@ -260,14 +252,14 @@ export default function SuperAdminDashboard() {
                     <View style={[
                       styles.iconContainer, 
                       { 
-                        backgroundColor: isActive ? '#2E9BFF18' : (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                        borderColor: isActive ? '#2E9BFF30' : (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')
+                        backgroundColor: isActive ? Colors.brand.primary + '18' : (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                        borderColor: isActive ? Colors.brand.primary + '30' : (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')
                       }
                     ]}>
                       <Ionicons
                         name="business"
                         size={20}
-                        color={isActive ? '#2E9BFF' : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')}
+                        color={isActive ? Colors.brand.primary : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)')}
                       />
                     </View>
                     
@@ -320,7 +312,7 @@ export default function SuperAdminDashboard() {
                       </Text>
                     </View>
                     
-                    <Ionicons name="chevron-forward" size={16} color="#2E9BFF" />
+                    <Ionicons name="chevron-forward" size={16} color={Colors.brand.primary} />
                   </View>
                 </TouchableOpacity>
               );
@@ -352,15 +344,15 @@ export default function SuperAdminDashboard() {
               {/* Modo oscuro */}
               <View style={styles.settingRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={[styles.settingIconBox, { backgroundColor: isDarkMode ? '#1A2440' : '#E6F4FF' }]}>
-                    <Ionicons name={isDarkMode ? 'moon' : 'sunny'} size={18} color="#2E9BFF" />
+                  <View style={[styles.settingIconBox, { backgroundColor: isDarkMode ? Colors.brand.primary + '18' : Colors.brand.primary + '10' }]}>
+                    <Ionicons name={isDarkMode ? 'moon' : 'sunny'} size={18} color={Colors.brand.primary} />
                   </View>
                   <Text style={styles.settingText}>Modo Oscuro</Text>
                 </View>
                 <Switch
                   value={isDarkMode}
                   onValueChange={toggleTheme}
-                  trackColor={{ false: '#333', true: '#2E9BFF' }}
+                  trackColor={{ false: '#333', true: Colors.brand.primary }}
                   thumbColor="#fff"
                 />
               </View>
@@ -413,6 +405,23 @@ function getStyles(isDarkMode: boolean) {
       width: 36, height: 36, borderRadius: 9,
       backgroundColor: theme.surfaceSecondary, alignItems: 'center', justifyContent: 'center',
       borderWidth: 1, borderColor: theme.border,
+    },
+    searchBarContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.inputBg,
+      height: Layout.height.input,
+      borderRadius: Layout.borderRadius.input,
+      paddingHorizontal: 15,
+      borderWidth: 1,
+      borderColor: theme.inputBorder,
+    },
+    searchInput: {
+      flex: 1,
+      color: theme.text,
+      fontSize: 14,
+      marginLeft: 10,
+      fontWeight: '500',
     },
 
     scroll: { paddingHorizontal: 16, paddingBottom: 48, gap: 20 },

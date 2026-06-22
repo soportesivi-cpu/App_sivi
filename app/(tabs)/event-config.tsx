@@ -26,7 +26,7 @@ import {
   updateWorkspaceAlarmPolygons,
   getDevices
 } from '../../services/api';
-import { Colors } from '../../constants/theme';
+import { Colors, Layout } from '../../constants/theme';
 
 export default function EventConfigScreen() {
   const router = useRouter();
@@ -189,23 +189,53 @@ export default function EventConfigScreen() {
     return cameraDevice;
   }, [cameraDevice, devicesData]);
 
-  function getStreamName(camera: any): string {
+  function isFrpConnection(): boolean {
+    let effectiveDomain = domain;
+    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
+      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
+      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    }
+    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
+    if (!isIpOrLocal || !effectiveDomain) return false;
+    const parts = effectiveDomain.split(':');
+    const host = parts[0];
+    const apiPort = parts[1];
+    return host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090';
+  }
+
+  function getStreamName(camera: any, isFrp: boolean = false): string {
     const camId = camera?.id;
     const camDevId = camera?.deviceId || camera?.device_id || camera?.uuid;
     
-    console.log('[STREAM ROI] getStreamName input:', camera);
-    if (camId && camDevId) {
-      const result = `${camId}-${camDevId}/1`;
-      console.log(`[STREAM ROI] getStreamName output (FORZADO): "${result}"`);
+    console.log('[STREAM ROI] getStreamName input:', camera, 'isFrp:', isFrp);
+    if (isFrp) {
+      if (camId && camDevId) {
+        const result = `${camId}-${camDevId}/1`;
+        console.log(`[STREAM ROI] getStreamName output FRP: "${result}"`);
+        return result;
+      }
+      const fallback = camDevId || `camara${camId || ''}`;
+      console.log(`[STREAM ROI] getStreamName output FRP FALLBACK: "${fallback}"`);
+      return fallback;
+    }
+
+    // Para entornos no-FRP (nube pura), usamos el mismo formateo que en cameras.tsx
+    const camName = camera?.name;
+    if (camName && camDevId) {
+      const nameParts = camName.split('_');
+      const cleanName = nameParts.length > 1 ? nameParts.slice(1).join('_') : camName;
+      const result = `${cleanName}-${camDevId}`;
+      console.log(`[STREAM ROI] getStreamName output CLOUD: "${result}"`);
       return result;
     }
     const fallback = camDevId || `camara${camId || ''}`;
-    console.log(`[STREAM ROI] getStreamName output (FALLBACK): "${fallback}"`);
+    console.log(`[STREAM ROI] getStreamName output CLOUD FALLBACK: "${fallback}"`);
     return fallback;
   }
 
   function getWebRtcUrl(camera: any): string {
-    const streamName = getStreamName(camera);
+    const isFrp = isFrpConnection();
+    const streamName = getStreamName(camera, isFrp);
     let effectiveDomain = domain;
     if ((currentWs?.id || '').toLowerCase() === 'realclub') {
       const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
@@ -227,7 +257,87 @@ export default function EventConfigScreen() {
       return `http://${host}:8889/${streamName}/`;
     }
 
-    return `https://${PROD_MEDIA_DOMAIN}:8889/${streamName}/`;
+    // Nube pura: usamos la URL proxy sobre puerto 443 sin el puerto 8889
+    return `https://${PROD_MEDIA_DOMAIN}/webrtc/${streamName}/whep`;
+  }
+
+  function getWebRtcHtml(camera: any): string {
+    const whepUrl = getWebRtcUrl(camera);
+    const token = workspaceTokenForStream;
+    const authHeader = token ? `headers['Authorization'] = 'Bearer ${token}';` : '';
+
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+      <style>
+        html, body { margin: 0; padding: 0; background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+        video { width: 100vw; height: 100vh; object-fit: contain; }
+        #err { color: #ff4444; font-family: sans-serif; text-align: center; padding: 20px; display: none; position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); }
+      </style>
+    </head>
+    <body>
+      <video id="video" autoplay muted playsinline controls></video>
+      <div id="err"></div>
+      <script>
+        var video = document.getElementById('video');
+        var err = document.getElementById('err');
+
+        function post(payload) {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        }
+
+        async function startWhep() {
+          try {
+            var pc = new RTCPeerConnection({
+              iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            pc.ontrack = function(event) {
+              if (event.streams && event.streams[0]) {
+                video.srcObject = event.streams[0];
+                video.play().catch(function(){});
+                post({ type: 'stream_status', protocol: 'webrtc', state: 'connected' });
+              }
+            };
+
+            var offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            var headers = { 'Content-Type': 'application/sdp' };
+            ${authHeader}
+
+            var res = await fetch('${whepUrl}', {
+              method: 'POST',
+              headers: headers,
+              body: offer.sdp
+            });
+
+            if (!res.ok) {
+              throw new Error('WHEP error: ' + res.status);
+            }
+
+            var answerSdp = await res.text();
+            await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+          } catch(e) {
+            err.style.display = 'block';
+            err.innerText = 'WebRTC Error: ' + e.message;
+            post({ type: 'stream_status', protocol: 'webrtc', state: 'disconnected' });
+          }
+        }
+
+        startWhep();
+      </script>
+    </body>
+    </html>
+  `;
   }
 
 
@@ -339,7 +449,7 @@ export default function EventConfigScreen() {
   if (loadingAlarm) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#2E9BFF" />
+        <ActivityIndicator size="large" color={Colors.brand.primary} />
         <Text style={{ color: isDarkMode ? 'rgba(255, 255, 255, 0.6)' : '#374151', marginTop: 15, fontSize: 14, fontWeight: '600' }}>
           Cargando configuración de la alarma...
         </Text>
@@ -450,11 +560,11 @@ export default function EventConfigScreen() {
       {/* HEADER PREMIUM */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.replace('/(tabs)/events')} style={styles.backBtn} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={24} color="#2E9BFF" />
+          <Ionicons name="arrow-back" size={24} color={Colors.brand.celeste} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{alarm.name || 'Detalles de Alarma'}</Text>
         <View style={styles.logoBox}>
-          <Ionicons name="shield-checkmark" size={18} color="#2E9BFF" />
+          <Ionicons name="shield-checkmark" size={18} color={Colors.brand.celeste} />
         </View>
       </View>
 
@@ -468,7 +578,7 @@ export default function EventConfigScreen() {
         {/* 1. SECCIÓN: DATOS GENERALES (IMAGEN 1 SUPERIOR) */}
         <View style={styles.bentoBlock}>
           <View style={styles.blockHeader}>
-            <Ionicons name="create-outline" size={20} color="#2E9BFF" />
+            <Ionicons name="create-outline" size={20} color={Colors.brand.primary} />
             <Text style={styles.blockTitle}>DATOS GENERALES</Text>
           </View>
           
@@ -490,8 +600,8 @@ export default function EventConfigScreen() {
             <Switch 
               value={eventActive} 
               onValueChange={setEventActive} 
-              trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-              thumbColor={eventActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+              trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+              thumbColor={eventActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
             />
           </View>
 
@@ -529,7 +639,7 @@ export default function EventConfigScreen() {
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Ionicons name="list-outline" size={20} color="#2E9BFF" />
+              <Ionicons name="list-outline" size={20} color={Colors.brand.primary} />
               <Text style={styles.blockTitle}>REGLAS REGISTRADAS</Text>
             </View>
             <Ionicons name={rulesExpanded ? "chevron-up" : "chevron-down"} size={16} color={isDarkMode ? '#fff' : '#111827'} />
@@ -547,7 +657,7 @@ export default function EventConfigScreen() {
                     {/* Fila superior: Analítica y Estado */}
                     <View style={styles.reportCardHeader}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Ionicons name="analytics-outline" size={14} color="#2E9BFF" />
+                        <Ionicons name="analytics-outline" size={14} color={Colors.brand.primary} />
                         <Text style={styles.reportAnalyticText}>{rule.analytic.toUpperCase()}</Text>
                       </View>
                       <View style={[styles.reportStatusBadge, { backgroundColor: rule.state === 'true' ? '#00C85315' : '#f4433615' }]}>
@@ -588,7 +698,7 @@ export default function EventConfigScreen() {
             activeOpacity={0.7}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Ionicons name="notifications-outline" size={20} color="#2E9BFF" />
+              <Ionicons name="notifications-outline" size={20} color={Colors.brand.primary} />
               <Text style={styles.blockTitle}>ACCIONES REGISTRADAS</Text>
             </View>
             <Ionicons name={actionsExpanded ? "chevron-up" : "chevron-down"} size={16} color={isDarkMode ? '#fff' : '#111827'} />
@@ -603,8 +713,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={popUpActive} 
                     onValueChange={setPopUpActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={popUpActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={popUpActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
                 <View style={styles.switchCol}>
@@ -612,8 +722,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={notifiableActive} 
                     onValueChange={setNotifiableActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={notifiableActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={notifiableActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -625,8 +735,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={whatsappActive} 
                     onValueChange={setWhatsappActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={whatsappActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={whatsappActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
                 <View style={styles.switchCol}>
@@ -634,8 +744,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={emailActive} 
                     onValueChange={setEmailActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={emailActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={emailActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -647,8 +757,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={soundActionActive} 
                     onValueChange={setSoundActionActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={soundActionActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={soundActionActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
                 <View style={styles.switchCol}>
@@ -656,8 +766,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={alertActive} 
                     onValueChange={setAlertActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={alertActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={alertActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -669,8 +779,8 @@ export default function EventConfigScreen() {
                   <Switch 
                     value={confirmationActive} 
                     onValueChange={setConfirmationActive} 
-                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                    thumbColor={confirmationActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                    trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                    thumbColor={confirmationActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                   />
                 </View>
               </View>
@@ -693,7 +803,7 @@ export default function EventConfigScreen() {
         {/* 6. SECCIÓN: REGIÓN DE INTERÉS (ROI) */}
         <View style={styles.bentoBlock}>
           <View style={styles.blockHeader}>
-            <Ionicons name="scan-outline" size={20} color="#2E9BFF" />
+            <Ionicons name="scan-outline" size={20} color={Colors.brand.primary} />
             <Text style={styles.blockTitle}>REGIÓN DE INTERÉS (ROI)</Text>
           </View>
 
@@ -707,8 +817,8 @@ export default function EventConfigScreen() {
                 <Switch 
                   value={roiActive} 
                   onValueChange={setRoiActive} 
-                  trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: '#2E9BFF30' }}
-                  thumbColor={roiActive ? '#2E9BFF' : (isDarkMode ? '#555' : '#D1D5DB')}
+                  trackColor={{ false: isDarkMode ? '#25283D' : '#E5E7EB', true: Colors.brand.primary + '30' }}
+                  thumbColor={roiActive ? Colors.brand.primary : (isDarkMode ? '#555' : '#D1D5DB')}
                 />
               </View>
               
@@ -739,7 +849,7 @@ export default function EventConfigScreen() {
              {/* 1. Fondo (Video o Imagen Estática) */}
              {isPlaying && resolvedCamera ? (
                <WebView
-                 source={{ uri: `${getWebRtcUrl(resolvedCamera)}?token=${workspaceTokenForStream}` }}
+                 source={{ html: getWebRtcHtml(resolvedCamera) }}
                  allowsInlineMediaPlayback={true}
                  mediaPlaybackRequiresUserAction={false}
                  domStorageEnabled={true}
@@ -759,7 +869,7 @@ export default function EventConfigScreen() {
                     style={styles.roiImage} 
                  />
                  <View style={styles.playOverlayBtn}>
-                   <Ionicons name="play-circle" size={48} color="#2E9BFF" />
+                   <Ionicons name="play-circle" size={48} color={Colors.brand.primary} />
                    <Text style={styles.playBtnText}>INICIAR VIDEO EN VIVO</Text>
                  </View>
                </TouchableOpacity>
@@ -772,7 +882,7 @@ export default function EventConfigScreen() {
                    <Polygon
                      points={pointsList.map((pt: any) => `${pt[0] * dimensions.width},${pt[1] * dimensions.height}`).join(' ')}
                      fill="rgba(46, 155, 255, 0.25)"
-                     stroke="#2E9BFF"
+                     stroke={Colors.brand.primary}
                      strokeWidth="3"
                    />
                    {pointsList.map((pt: any, index: number) => (
@@ -781,7 +891,7 @@ export default function EventConfigScreen() {
                        cx={pt[0] * dimensions.width}
                        cy={pt[1] * dimensions.height}
                        r="12"
-                       fill="#2E9BFF"
+                       fill={Colors.brand.primary}
                        stroke="#ffffff"
                        strokeWidth="2.5"
                      />
@@ -807,7 +917,7 @@ export default function EventConfigScreen() {
                     <Ionicons 
                       name={isPlaying ? "pause-circle" : "play-circle"} 
                       size={24} 
-                      color={isPlaying ? "#ffffffaa" : "#2E9BFF"} 
+                      color={isPlaying ? "#ffffffaa" : Colors.brand.primary} 
                     />
                   </TouchableOpacity>
                 )}
@@ -942,7 +1052,18 @@ const getStyles = (isDark: boolean) => {
 
     // Estilos de los switches estilo Web
     switchRow: { flexDirection: 'row', gap: 8 },
-    switchCol: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: bgCardSecondary, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: borderCol },
+    switchCol: { 
+      flex: 1, 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      backgroundColor: themeColors.inputBg, 
+      paddingVertical: 8, 
+      paddingHorizontal: 12, 
+      borderRadius: Layout.borderRadius.input, 
+      borderWidth: 1, 
+      borderColor: themeColors.inputBorder 
+    },
     switchLabel: { color: textPrimary, fontSize: 12, fontWeight: '700' },
 
     settingRow: { flexDirection: 'row', alignItems: 'center', gap: 15 },
@@ -953,10 +1074,10 @@ const getStyles = (isDark: boolean) => {
     selectorLabel: { color: textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
     soundScroll: { marginTop: 10 },
     soundPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
-    soundPillActive: { backgroundColor: '#2E9BFF18', borderColor: '#2E9BFF40' },
+    soundPillActive: { backgroundColor: Colors.brand.primary + '18', borderColor: Colors.brand.primary + '40' },
     soundPillInactive: { backgroundColor: bgCardSecondary, borderColor: borderCol },
     soundText: { fontSize: 11, fontWeight: '700' },
-    soundTextActive: { color: '#2E9BFF' },
+    soundTextActive: { color: Colors.brand.primary },
     soundTextInactive: { color: textMuted },
 
     pointsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
@@ -978,11 +1099,21 @@ const getStyles = (isDark: boolean) => {
     alarmBoxActive: { backgroundColor: 'rgba(244, 67, 54, 0.04)', borderWidth: 1, borderColor: 'rgba(244, 67, 54, 0.15)' },
     alarmParams: { marginTop: 14 },
     inputGroup: { gap: 6 },
-    darkInput: { backgroundColor: bgCardSecondary, height: 46, borderRadius: 10, paddingHorizontal: 14, color: textPrimary, fontSize: 13, fontWeight: '700', borderWidth: 1, borderColor: borderCol },
+    darkInput: { 
+      backgroundColor: themeColors.inputBg, 
+      height: Layout.height.input, 
+      borderRadius: Layout.borderRadius.input, 
+      paddingHorizontal: 14, 
+      color: textPrimary, 
+      fontSize: 13, 
+      fontWeight: '700', 
+      borderWidth: 1, 
+      borderColor: themeColors.inputBorder 
+    },
     timeRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
     timeInputBox: { flex: 1, gap: 6 },
 
-    saveBtn: { backgroundColor: '#2E9BFF', height: 50, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8, alignSelf: 'center', paddingHorizontal: 24 },
+    saveBtn: { backgroundColor: Colors.brand.primary, height: 50, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8, alignSelf: 'center', paddingHorizontal: 24 },
     saveBtnText: { color: '#fff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
 
   });
