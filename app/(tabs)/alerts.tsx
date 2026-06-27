@@ -390,11 +390,11 @@ function AlertCardItem({
           )}
           <View style={styles.gridCardLabelRow}>
             <Text style={styles.gridCardLabel}>PROB.</Text>
-            <Text style={styles.gridCardLabel}>{formatHora(item.createdAt)}</Text>
+            <Text style={styles.gridCardTimeText}>{formatHora(item.createdAt)}</Text>
           </View>
           <View style={styles.gridCardValueRow}>
             <Text style={styles.gridCardProbValue}>{prob.toFixed(0)}%</Text>
-            <Text style={styles.gridCardTimeValue}>{formatFechaDDMMYY(item.createdAt)}</Text>
+            <Text style={styles.gridCardDateText}>{formatFechaDDMMYY(item.createdAt)}</Text>
           </View>
         </View>
 
@@ -572,8 +572,11 @@ export default function AlertsScreen() {
 
   useEffect(() => {
     wsService.disconnect();
-    conectarWebSocket();
-    return () => wsService.disconnect();
+    const cleanWsSub = conectarWebSocket();
+    return () => {
+      if (cleanWsSub) cleanWsSub();
+      wsService.disconnect();
+    };
   }, [domain, activeSession]);
 
   useEffect(() => {
@@ -813,7 +816,7 @@ export default function AlertsScreen() {
     }
   }
 
-  async function conectarWebSocket() {
+  function conectarWebSocket() {
     wsService.connect();
     const unsubscribe = wsService.subscribe((payload: any) => {
       const channel = payload?.channel;
@@ -845,7 +848,7 @@ export default function AlertsScreen() {
 
         const id = rawData.id ?? Math.floor(Math.random() * 1000000);
 
-        const tag = rawData.tag || (channel === 'event_motion' ? 'motion' : channel) || 'alert';
+        const tag = rawData.tag || channel || 'alert';
 
         const rawDev = rawData.device || rawData.Device || rawData.camera || rawData.Camera;
         const devId = rawData.device_id || rawData.deviceId || rawDev?.id || rawDev?.deviceId;
@@ -1752,7 +1755,7 @@ export default function AlertsScreen() {
                         <Text style={styles.popupLiveText}>NUEVA ALERTA EN TIEMPO REAL</Text>
                       </View>
                       <TouchableOpacity style={styles.popupCloseBtn} onPress={dismissRealTimePopup}>
-                        <Ionicons name="close" size={16} color="#ffffff80" />
+                        <Ionicons name="close" size={16} color={isDarkMode ? '#ffffff80' : '#00000080'} />
                       </TouchableOpacity>
                     </View>
 
@@ -1790,7 +1793,7 @@ export default function AlertsScreen() {
                           </Text>
                         </View>
                         <View style={styles.popupTimeRow}>
-                          <Ionicons name="calendar-outline" size={10} color="#ffffff60" style={{ marginRight: 4 }} />
+                          <Ionicons name="calendar-outline" size={10} color={isDarkMode ? '#ffffff60' : '#00000060'} style={{ marginRight: 4 }} />
                           <Text style={styles.popupTimeText}>
                             {formatFechaPrecisa(realTimePopupAlert.createdAt)}
                           </Text>
@@ -1925,7 +1928,7 @@ const getStyles = (isDark: boolean) => {
       paddingHorizontal: 15,
       height: Layout.height.input,
       marginHorizontal: 20,
-      marginBottom: 20,
+      marginBottom: 8,
     },
     searchInput: {
       flex: 1,
@@ -1973,7 +1976,7 @@ const getStyles = (isDark: boolean) => {
     },
     gridCardCamName: {
       color: textSecondary,
-      fontSize: 11,
+      fontSize: 10,
       fontWeight: '800',
       textTransform: 'uppercase',
     },
@@ -1988,7 +1991,7 @@ const getStyles = (isDark: boolean) => {
     },
     gridCardTitle: {
       color: textPrimary,
-      fontSize: 12.5,
+      fontSize: 11,
       fontWeight: '800',
       marginBottom: 8,
     },
@@ -2002,6 +2005,11 @@ const getStyles = (isDark: boolean) => {
       fontSize: 10,
       fontWeight: '700',
     },
+    gridCardTimeText: {
+      color: isDark ? textMuted : textSecondary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
     gridCardValueRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -2012,9 +2020,9 @@ const getStyles = (isDark: boolean) => {
       fontSize: 17.5,
       fontWeight: '900',
     },
-    gridCardTimeValue: {
+    gridCardDateText: {
       color: textSecondary,
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: '700',
     },
 
@@ -2056,8 +2064,8 @@ const getStyles = (isDark: boolean) => {
     footerInfo: { flex: 1 },
     footerMetrics: { alignItems: 'flex-end' },
 
-    cardTipo: { fontSize: 10.5, fontWeight: '800', letterSpacing: 0.5 },
-    cardCam: { color: textSecondary, fontSize: 14, fontWeight: '500', marginTop: 4 },
+    cardTipo: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+    cardCam: { color: textSecondary, fontSize: 15, fontWeight: '500', marginTop: 4 },
     cardHora: { color: isDark ? textMuted : textSecondary, fontSize: 11, marginBottom: 2 },
     cardProb: { color: textPrimary, fontSize: 16, fontWeight: '800' },
 
@@ -2424,14 +2432,14 @@ const getStyles = (isDark: boolean) => {
     },
     popupCard: {
       flexDirection: 'row',
-      backgroundColor: '#161622',
+      backgroundColor: bgCardSecondary,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.08)',
+      borderColor: borderCol,
       overflow: 'hidden',
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
+      shadowOpacity: isDark ? 0.3 : 0.15,
       shadowRadius: 6,
     },
     popupAccentLine: {
@@ -2498,7 +2506,7 @@ const getStyles = (isDark: boolean) => {
       textTransform: 'uppercase',
     },
     popupAlarmName: {
-      color: '#ffffff',
+      color: textPrimary,
       fontSize: 12,
       fontWeight: '800',
     },
@@ -2508,7 +2516,7 @@ const getStyles = (isDark: boolean) => {
       marginBottom: 2,
     },
     popupMetricLabel: {
-      color: '#ffffff60',
+      color: textSecondary,
       fontSize: 10,
       fontWeight: '600',
     },
@@ -2521,7 +2529,7 @@ const getStyles = (isDark: boolean) => {
       alignItems: 'center',
     },
     popupTimeText: {
-      color: '#ffffff50',
+      color: textMuted,
       fontSize: 9,
       fontWeight: '600',
     },
@@ -2561,7 +2569,8 @@ const getStyles = (isDark: boolean) => {
     whatsappDateContainer: {
       width: '100%',
       alignItems: 'center',
-      marginVertical: 14,
+      marginTop: 4,
+      marginBottom: 12,
     },
     whatsappDateBubble: {
       backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',

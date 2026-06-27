@@ -78,8 +78,8 @@ export default function LoginScreen() {
       // Invocar setSession con la firma actualizada
       await setSession(workspace.domain, data.token, data.jwt, data.user, workspace, data.sessions);
 
-      // Guardar contraseña encriptada en SecureStore para futuras re-autenticaciones silenciosas
-      await SecureStore.setItemAsync('secure_user_pass', password.trim());
+      // Asegurar que no quede ninguna contraseña residual en texto plano en el SecureStore
+      await SecureStore.deleteItemAsync('secure_user_pass').catch(() => {});
 
       // Ir al dashboard
       router.replace('/(tabs)/dashboard');

@@ -1,12 +1,13 @@
-# AliceGuardian App — Arquitectura de Conectividad
-> Documento de referencia para cualquier agente de IA o desarrollador que trabaje en este proyecto.
+# AliceGuardian App — Arquitectura de Conectividad y Lógica Operativa
+
+> Documento de referencia para cualquier agente de IA o desarrollador senior que trabaje en este proyecto.
 > Última actualización: Junio 2026
 
 ---
 
-## 🗺 Resumen del Sistema
+## 🗺️ Resumen del Sistema
 
-AliceGuardian es una app móvil (React Native + Expo Router) que se conecta a la plataforma **SIVI Imperium**. La conectividad tiene **tres capas independientes** con dominios y protocolos distintos.
+AliceGuardian es una aplicación móvil nativa (React Native + Expo Router) que se conecta a la suite corporativa **SIVI Imperium**. La conectividad móvil está dividida en **tres capas independientes** con dominios, puertos y protocolos especializados.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -32,14 +33,14 @@ https://orchestrator.guardian.imperium.pe
 ```
 Adicionalmente, se interactúa con las URLs de subdominios correspondientes a cada Workspace activo de producción configurado (ej. `https://control.guardian.imperium.pe`).
 
-### Autenticación
+### Autenticación y Envío de Parámetros
 Las peticiones que consultan datos específicos de workspaces envían las credenciales o tokens de sesión resueltos a través de la pasarela API Gateway en un JSON body estructurado:
 ```json
 {
   "sessions": [
     {
       "workspace": "nombre_workspace",
-      "token": "token_workspace"
+      "token": "token_especifico_del_workspace"
     }
   ]
 }
@@ -57,126 +58,103 @@ Las peticiones que consultan datos específicos de workspaces envían las creden
 | `/mobile/workspaces/events/classify` | POST | Clasificación de una alerta (Confirmar / Falso Positivo / Ignorar). |
 | `/mobile/workspaces/events/incidents/description` | POST | Agregar minutas/notas a incidentes de seguridad. |
 
+### Reescritura Dinámica de URLs de Evidencia (Local a Público)
+La capa API en [`services/api.ts`](file:///d:/app_sivi/AliceGuardianApp/services/api.ts) intercepta las URLs de imágenes y recursos devueltas por el servidor que apunten a direcciones locales (ej: `127.0.0.1`, `localhost`, `local.imperium.pe`) y las reescribe dinámicamente utilizando el dominio público del workspace activo (ej: `control.guardian.imperium.pe`) obtenido de Zustand y mapeado contra los valores configurados en [`constants/config.ts`](file:///d:/app_sivi/AliceGuardianApp/constants/config.ts).
+
 ---
 
 ## 2. 📡 Socket.IO (Tiempo Real)
 
-### Dominio
+### Dominio y Protocolo Crítico
 ```
 wss://{activeDomain}/socket.io/ (o wss://orchestrator.guardian.imperium.pe/socket.io/ por defecto)
 ```
+- **Engine.IO Versión 3 (`EIO=3`):** El backend de SIVI requiere estrictamente el handshake de Engine.IO v3. Se implementa la dependencia `socket.io-client@2.3.0` para asegurar compatibilidad total.
 
-### Configuración crítica
-```
-EIO=3  ← Engine.IO versión 3 (obligatorio para compatibilidad con SIVI)
-pingInterval: 25000 ms  ← confirmado por handshake del servidor
-pingTimeout:  20000 ms
-```
+### Namespaces Multiplexados en Producción
+Para recibir eventos sin saturar un solo hilo de datos, la aplicación abre canales de WebSocket multiplexados simultáneamente con el token de sesión inyectado en el query:
 
-### Librería
-```
-socket.io-client@2.3.0  ← NO usar versiones 3.x o 4.x (incompatibles con EIO=3)
-```
-
-### Eventos que escucha la app (canales activos)
-Multiplexado en los namespaces `/workspace-data`, `/workspace-lpr`, `/workspace-motion`, `/workspace-GUNS` según la configuración:
-| Evento / Canal | Namespace | Descripción |
+| Namespace | Stream Name / Evento | Datos del Canal |
 |---|---|---|
-| `face` | `/workspace-data` | Detección de rostros |
-| `lpr` | `/workspace-lpr` | Lectura de placa vehicular |
-| `alert` / `new_alert` | Todos | Alerta general de analítica (intrusión, movimiento) |
-| `event_motion` | `/workspace-motion` | Movimiento detectado en zona |
-| `GUNS` | `/workspace-GUNS` | Detección de armas u objetos peligrosos |
-| `alarm_stats` | `/workspace-data` | Métricas y estado global del Workspace |
+| `/workspace-data` | `data` | Rostros (`face`), alertas generales, telemetría (`alarm_stats`), y eventos. |
+| `/workspace-lpr` | `lpr` | Patentes vehiculares (`lpr`), alertas y detecciones. |
+| `/workspace-GUNS` | `GUNS` | Detección de amenazas de seguridad, armas y objetos peligrosos (`GUNS`). |
 
-### Handshake y Handlers de analítica
+### Handshake y Re-conexión Dinámica
 ```javascript
-// Autenticar la sesión WebSocket en la conexión
-socket.emit('authenticate', { token: jwtToken });
+// Paso 1: Autenticar la sesión en la conexión de cada socket namespace
+socket.emit('authenticate', { token: wsToken });
 
-// PASO CRÍTICO: Iniciar el streaming en el namespace para que el servidor comience a enviar eventos
+// Paso 2: Emitir el evento de inicio (PASO CRÍTICO - Sin esto el servidor no envía nada)
 socket.emit('start_streaming', streamName);
 ```
+
+#### Sincronización en Caliente con Zustand Store
+[`services/websocket.ts`](file:///d:/app_sivi/AliceGuardianApp/services/websocket.ts) está suscrito reactivamente al estado global de Zustand:
+```typescript
+useAppStore.subscribe((state) => { ... });
+```
+Si se detecta un cambio en las sesiones de los workspaces (`workspaceSessions`), en el workspace activo (`activeWorkspace`) o en el workspace personificado (`impersonatedWorkspace`), el servicio realiza una desconexión limpia (`wsService.disconnect()`) de todos los sockets en curso y reestablece automáticamente las conexiones multiplexadas utilizando los nuevos tokens y dominios.
 
 ---
 
 ## 3. 🎥 Video Streaming
 
-### Servidor de media (MediaMTX)
+### Servidor de Media (MediaMTX)
+Las cámaras IP transmiten su flujo en tiempo real mediante el servidor open-source **MediaMTX**:
 ```
-MediaMTX corriendo en: control.guardian.imperium.pe (PROD_MEDIA_DOMAIN)
+MediaMTX en: control.guardian.imperium.pe (PROD_MEDIA_DOMAIN)
 HLS output:   https://control.guardian.imperium.pe:8888/{stream_name}/index.m3u8
 WHEP output:  https://control.guardian.imperium.pe/webrtc/{stream_name}/whep
 ```
 
-### Estrategia de reproducción (alternancia manual)
-```
-1. WebRTC WHEP   → latencia < 1 segundo (preferido, por defecto)
-2. HLS           → latencia 3–5 segundos (alternativo en caso de restricciones de red)
-```
-
-### WebRTC WHEP — Flujo de negociación
-```
-1. POST https://control.guardian.imperium.pe/webrtc/{stream_name}/whep
-   Headers: Content-Type: application/sdp
-            Authorization: Bearer {workspaceToken}
-   Body: SDP offer
-
-2. Respuesta: SDP answer (body)
-```
-
-### Archivos relevantes
-- `constants/config.ts` → `PROD_MEDIA_DOMAIN = 'control.guardian.imperium.pe'`
-- `app/(tabs)/cameras.tsx` → `getStreamName()`, `getHlsUrl()`, `getWebRtcUrl()` y HTML del reproductor inyectado.
+### Estrategia de Reproducción Híbrida
+Para garantizar reproducción estable, la app monta un elemento `<WebView>` nativo inyectando un reproductor HTML5 con dos configuraciones:
+1. **WebRTC WHEP (Baja Latencia, <1s):** Envía una SDP Offer al puerto `8889` mediante HTTP `POST` con la cabecera `Authorization: Bearer <workspace_token>` y establece una conexión directa Peer-to-Peer.
+2. **HLS Fallback (Latencia 3-5s):** Utiliza `hls.js` para renderizar el manifiesto `.m3u8` en el puerto `8888` si los cortafuegos o la señal móvil impiden la negociación WebRTC.
 
 ---
 
-## 4. ⚙️ Constantes del Proyecto
+## 4. 🔑 Persistencia Segura y Estados Globales
 
-```typescript
-// constants/config.ts
-PROD_API_DOMAIN   = 'orchestrator.guardian.imperium.pe'  // API principal / Gateway
-PROD_MEDIA_DOMAIN = 'control.guardian.imperium.pe'       // HLS + WebRTC WHEP
+La aplicación móvil almacena de forma persistente sus credenciales encriptadas en el llavero físico del dispositivo a través de `expo-secure-store`:
 
-// Workspaces registrados
-WORKSPACES = [
-  { id: 'control', name: 'Imperium Control', domain: 'control.guardian.imperium.pe', ... },
-  { id: 'cmarket', name: 'Imperium Cmarket', domain: 'cmarket.guardian.imperium.pe', ... },
-  ...
-]
-```
+- `jwt_token`: Token global de autenticación del usuario.
+- `workspace_token`: Token del workspace activo seleccionado.
+- `workspace_sessions`: JSON serializado con las sesiones activas de todos los workspaces.
+- `active_domain`: El dominio de la pasarela activa.
+- `active_workspace`: Datos del workspace activo actual.
+- `theme_preference` y `sound_preference`: Preferencias de interfaz (`dark`/`light`) y habilitación de audio de alertas (`enabled`/`disabled`).
 
 ---
 
-## 5. 🔑 JWT Token
-
-- Se obtiene del endpoint unificado `POST /mobile/auth/login`
-- Se almacena en `expo-secure-store` bajo la clave `jwt_token`
-- Las credenciales de workspaces adicionales y sesiones se persisten también en `workspace_sessions` y `active_workspace` para aislamiento de datos.
-
----
-
-## 6. 📁 Estructura de Archivos Clave
+## 📁 5. Estructura de Archivos Clave
 
 ```
 services/
-  api.ts          → getDashboard(), getWorkspacesDevices(), getWorkspacesEvents(), getAlarms()
-  store.ts        → Zustand store (jwtToken, activeDomain, userData, activeWorkspace, workspaceSessions)
-  websocket.ts    → AlertSocketService singleton (wsService) para namespaces multiplexados
+  api.ts          → getDashboard(), getWorkspacesDevices(), getWorkspacesEvents(), getAlarms(), parseUTCDate(), getMediaUrl()
+  store.ts        → Zustand store (jwtToken, activeDomain, userData, activeWorkspace, workspaceSessions, refreshWorkspacesSessions())
+  websocket.ts    → AlertSocketService singleton (wsService) para namespaces multiplexados y re-conexión automática reactiva
+  sound.ts        → Controlador de sonido para alertas en segundo plano/vivo
 
 constants/
-  config.ts       → Dominios de producción, WORKSPACES
+  config.ts       → Dominios de producción, WORKSPACES estáticos
+  theme.ts        → Paleta cromática corporativa SIVI, fuentes y estilos globales
+
+components/
+  AdminDashboard.tsx      → Métricas de operador, estado de hardware y últimas alertas
+  SuperAdminDashboard.tsx → Pantalla de selección y personificación de múltiples sucursales
+  Loading.tsx             → Animaciones premium de transición
 
 app/
   _layout.tsx     → Boot del ciclo de vida del socket al hidratar token y dominio
-  index.tsx       → Guardia de tráfico de entrada (auth frente a tabs)
+  index.tsx       → Guardia de tráfico de entrada (autenticado frente a no-autenticado)
   (tabs)/
-    dashboard.tsx → Enrutador condicional de dashboards
-    cameras.tsx   → Grid de cámaras y WebView player
-    alerts.tsx    → Gestión forense de alertas con scroll infinito y acciones de confirmación
-    events.tsx    → Configuración y reglas de eventos
-    settings.tsx  → Ajustes de perfil, sucursal activa y cierre de sesión seguro
-    event-config.tsx → Configuración detallada de alarma y región de interés (ROI) interactiva con SVG
+    _layout.tsx   → Configura pestañas operativas y bloquea UI a SuperAdmin sin personificar (href: null)
+    dashboard.tsx → Enrutador de pantallas de dashboard (SuperAdmin vs Admin)
+    cameras.tsx   → Grid de cámaras, reproductor híbrido WebView y debugger postMessage
+    alerts.tsx    → Gestión forense de alertas con scroll infinito, WS subscription y popup en caliente
+    events.tsx    → Configuración de reglas, switches de activación y fallbacks de error de red
+    settings.tsx  → Perfil de usuario, switch de tema/sonido y borrado seguro de persistencia
+    event-config.tsx → Editor táctil interactivo de ROI mediante polígonos SVG y gestos nativos de PanResponder
 ```
-
-

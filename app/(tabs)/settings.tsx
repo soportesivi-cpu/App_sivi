@@ -20,7 +20,9 @@ export default function SettingsScreen() {
   const fullName = userData 
     ? `${userData.first_name || userData.firstName || ''} ${userData.last_name || userData.lastName || ''}`.trim() || userData.Username || userData.username || 'Usuario'
     : 'Usuario';
-  const roleName = userData?.role?.name === 'SuperAdmin' ? 'SUPERADMIN' : 'ADMIN';
+  const roleName = userData?.role?.name === 'SuperAdmin' 
+    ? 'SUPERADMIN' 
+    : (userData?.role?.name?.toLowerCase() === 'monitor' ? 'MONITOR' : 'ADMIN');
   const workspaceName = currentWs?.name || currentWs?.id || currentWs?.workspace || 'Workspace';
 
   const styles = getStyles(isDarkMode);
@@ -103,10 +105,6 @@ const getStyles = (isDark: boolean) => {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: themeColors.background, paddingTop: 50 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, height: 60, borderBottomWidth: 1, borderBottomColor: themeColors.border },
-    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-    backBtn: { padding: 5 },
-    logoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    logoText: { color: '#2E9BFF', fontSize: 18, fontWeight: '900', letterSpacing: -1 },
 
     scrollContent: { paddingHorizontal: 20, paddingBottom: 120 },
     settingsTitle: { color: themeColors.text, fontSize: 36, fontWeight: '800' },

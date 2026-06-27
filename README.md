@@ -84,7 +84,7 @@ La aplicación organiza su conectividad en **tres capas independientes** con pro
 *   **Resolución Dinámica:** La aplicación decide automáticamente si conectarse mediante protocolo seguro (**`wss://`**) o inseguro (**`ws://`**):
     *   **`wss://` (producción):** Se utiliza cuando se conecta a un dominio público/producción (ej. `orchestrator.guardian.imperium.pe` bajo HTTPS en el puerto `443`).
     *   **`ws://` (local/desarrollo):** Se utiliza cuando el dominio configurado es local (localhost, IPs de red privada como `192.168.x.x` o puertos locales), evitando problemas con certificados SSL locales.
-*   **Eventos:** Escucha de forma multiplexada sobre namespaces `/workspace-data`, `/workspace-lpr`, `/workspace-motion`, `/workspace-GUNS` para notificaciones inmediatas de rostros (`face`), placas (`lpr`), intrusiones (`alert`), movimiento (`event_motion`) y armas (`GUNS`).
+*   **Eventos:** Escucha de forma multiplexada sobre namespaces `/workspace-data`, `/workspace-lpr`, `/workspace-GUNS` para notificaciones inmediatas de rostros (`face`), placas (`lpr`), intrusiones (`alert`) y armas (`GUNS`).
 
 
 ### 3. Capa de Video Streaming (HTTPS/WSS - Puertos 8888 & 8889)

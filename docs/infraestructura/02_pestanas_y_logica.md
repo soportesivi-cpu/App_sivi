@@ -1,11 +1,12 @@
 # 📱 Arquitectura de Pantallas y Lógica de Negocio
-> **Documento 02:** Detalle de pestañas, enrutamiento, lógica interna de frontend y mecanismos de resiliencia de la interfaz móvil.
+
+> **Documento 02:** Detalle de pestañas, enrutamiento, lógica interna de frontend, sincronización reactiva en tiempo real y mecanismos de interacción avanzados de la interfaz móvil.
 
 ---
 
 ## 🗂️ Estructura de Navegación (Tabs y Expo Router)
 
-La aplicación móvil organiza su flujo de trabajo principal en **pestañas operativas** bajo el tab-bar nativo, configuradas en la ruta `/app/(tabs)`. Cada pantalla posee su propio ciclo de vida y sus conexiones dinámicas a la API de producción de SIVI:
+La aplicación móvil organiza su flujo de trabajo principal en **pestañas operativas** bajo un tab-bar nativo, configuradas en la ruta `/app/(tabs)`. Cada pantalla posee su propio ciclo de vida y sus conexiones dinámicas a la API y el servidor de WebSockets de SIVI:
 
 ```
                   ┌──────────────────────────────────────────────┐
@@ -24,6 +25,12 @@ La aplicación móvil organiza su flujo de trabajo principal en **pestañas oper
              └───────────┘                               └───────────┘
 ```
 
+### 🔒 Restricciones de Acceso por Rol (SuperAdmin vs Admin)
+El archivo layout [`app/(tabs)/_layout.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/_layout.tsx) implementa lógica de seguridad y restricción de navegación dinámica basada en roles y estado de personificación:
+1. **Acceso Restringido (`restrictAccess`):** Si el usuario logueado posee el rol de `SuperAdmin` y no ha seleccionado ningún espacio de trabajo activo (es decir, `impersonatedWorkspace` es `null`), se activa esta bandera.
+2. **Ocultación Completa de Barra:** Al cumplirse `restrictAccess`, la propiedad `tabBarStyle.display` se establece en `'none'`, ocultando la barra de pestañas por completo para impedir navegación errónea.
+3. **Desactivación de Rutas:** Las pestañas de **Cámaras**, **Alertas**, **Eventos** y **Buscar** reciben `href: null` dinámicamente, deshabilitando su registro y acceso directo en el enrutador de Expo.
+
 ---
 
 ## ⚙️ Análisis Detallado de Cada Pestaña y su Lógica
@@ -31,90 +38,98 @@ La aplicación móvil organiza su flujo de trabajo principal en **pestañas oper
 ---
 
 ### 1. 📊 Panel de Control (Dashboard)
-* **Archivo Principal:** `app/(tabs)/dashboard.tsx` (Componentes de UI: `components/AdminDashboard.tsx` y `components/SuperAdminDashboard.tsx`)
+* **Archivo Principal:** [`app/(tabs)/dashboard.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/dashboard.tsx)
+* **Componentes de UI:** [`components/AdminDashboard.tsx`](file:///d:/app_sivi/AliceGuardianApp/components/AdminDashboard.tsx) y [`components/SuperAdminDashboard.tsx`](file:///d:/app_sivi/AliceGuardianApp/components/SuperAdminDashboard.tsx)
 * **Lógica Interna:**
-  * **Síntesis Dinámica de Datos (REST BFF):** Al cargar, llama de forma asíncrona a la función `getDashboard()`, la cual realiza peticiones concurrentes en el backend para unificar `getWorkspaceState()` (estado de hardware/cámaras/discos), `getWorkspacesEvents()` (lista de últimas alertas) y `getWorkspacesAlertsDashboard()` (métricas del operador).
-  * **Normalizador Intermedio:** Une y traduce los datos de producción:
-    * Convierte el listado de cámaras en un estado en vivo binario: si la cámara tiene la propiedad `error: true` en el JSON remoto, se clasifica como **Offline**, de lo contrario se clasifica como **Online**.
-    * Extrae el porcentaje de almacenamiento en disco real (`disk0.percent` o `ram.percent`).
-    * Mapea la lista de alertas recientes traduciendo tipos de analíticas en strings legibles e íconos gráficos (`walk-outline` para intrusiones, `car-outline` para placas, `person-outline` para rostros).
-  * **Interacción:** El botón "Ver todas" redirige instantáneamente al usuario a la pestaña de Alertas con una transición animada.
+  * **Enrutador de Pantalla Condicional:** Al cargar, `dashboard.tsx` evalúa el rol de usuario de Zustand:
+    - Si es `SuperAdmin` y no hay workspace personificado, renderiza `<SuperAdminDashboard />`, presentando la grilla de selección global de sucursales/workspaces.
+    - Si es un `Admin` regular, o un `SuperAdmin` con un workspace personificado (`impersonatedWorkspace !== null`), renderiza el `<AdminDashboard />` operativo.
+  * **Síntesis Dinámica de Datos (REST BFF):** `AdminDashboard` llama de forma asíncrona a `getDashboard()`, la cual unifica llamadas concurrentes a nivel de backend:
+    - `getWorkspaceState()` (estado físico de red, discos, procesadores).
+    - `getWorkspacesEvents()` (historial de alertas recientes).
+    - `getWorkspacesAlertsDashboard()` (métricas agregadas de eficacia y tiempos del operador).
+  * **Normalizador Intermedio:** Convierte e integra los datos:
+    - Traduce el listado de cámaras a estado binario: si el JSON del backend incluye `error: true` para un dispositivo, se define como **Offline**, de lo contrario se considera **Online**.
+    - Resuelve el porcentaje de almacenamiento a partir de `disk0.percent` o `ram.percent`.
+    - Mapea las alertas asociándoles íconos descriptivos según el tipo de analítica (`walk-outline` para intrusiones, `car-outline` para placas, `person-outline` para rostros).
 
 ---
 
 ### 2. 🎥 Monitoreo en Vivo (Cámaras)
-* **Archivo Principal:** `app/(tabs)/cameras.tsx`
+* **Archivo Principal:** [`app/(tabs)/cameras.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/cameras.tsx)
 * **Lógica Interna:**
-  * **Carga de Grid Dinámico:** Recupera la lista de cámaras activas (`getDevices()` o `getWorkspacesDevices()`). Construye de manera determinista el nombre del stream HLS/WebRTC (usando la función `getStreamName`) concatenando el nombre normalizado del dispositivo y su identificador único (ej: `{cleanName}-{deviceId}`).
-  * **Reproductor WebRTC / HLS Híbrido:** Renderiza cada celda de video a través de un componente `<WebView>` que hospeda un reproductor interno HTML5. Este inyecta scripts optimizados para:
-    1. Intentar conectarse a la API de WHEP (baja latencia WebRTC Peer Connection).
-    2. Escuchar candidatos ICE del MediaMTX.
-    3. Si falla la conexión WebRTC por cortafuegos o mala señal, realiza un fallback transparente en menos de 3 segundos cargando la lista HLS `.m3u8` en el puerto `8888`.
-  * **Overlay de Analíticas en Consola:** El reproductor en el WebView envía eventos del tipo `draw_streaming` a través de `postMessage`, los cuales son capturados en el handler `onMessage` de React Native para registrar los datos en los logs de la consola (`console.log`) con fines de depuración, sin pintar overlays 2D flotantes directamente sobre el video en esta versión.
+  * **Carga de Grid Dinámico:** Recupera la lista de dispositivos activos (`getDevices()` o `getWorkspacesDevices()`). Construye el nombre canónico del stream de video concatenando el nombre formateado y el ID único del dispositivo (`{cleanName}-{deviceId}`).
+  * **WebView Player Híbrido:** Renderiza el stream a través de un componente `<WebView>` que hospeda reproductores HTML5 inyectados según el modo de video seleccionado:
+    1. **WebRTC WHEP (Baja Latencia, <1s):** Inyecta una plantilla de página web que inicializa un `RTCPeerConnection` nativo del navegador WebView, agrega transceptores de audio/video para recibir datos (`recvonly`), y realiza un apretón de manos HTTP `POST` enviando el *SDP Offer* y el token de sesión en la cabecera `Authorization: Bearer <token>` hacia la API WHEP de MediaMTX.
+    2. **HLS Fallback (Latencia 3-5s):** Utiliza la librería `hls.js` dentro del HTML inyectado para reproducir fragmentos de video `.m3u8` en navegadores/dispositivos Android sin soporte nativo de HLS. Si `hls.js` no está soportado, cae al reproductor nativo del tag `<video>` con lógica de reintento automático (hasta 3 veces con 2 segundos de cooldown).
+  * **Puente de Comunicación WebView-React Native (`postMessage`):**
+    - El reproductor interno envía mensajes JSON que son recibidos por el callback `onMessage` de la WebView.
+    - Se procesa el estado del stream (`connected` o `disconnected`) para actualizar badges visuales en caliente.
+    - Captura eventos del tipo `draw_streaming` (metadatos de bounding boxes detectadas en caliente por la analítica del servidor) y los imprime en la consola del desarrollador con fines de depuración y pruebas de telemetría.
 
 ---
 
 ### 3. 🔍 Búsqueda Forense (Buscar)
-* **Archivo Principal:** `app/(tabs)/search.tsx`
+* **Archivo Principal:** [`app/(tabs)/search.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/search.tsx)
 * **Lógica Interna:**
-  * **Formulario de Filtros Avanzados:** Expone selectores táctiles para acotar búsquedas por tipo de analítica (Rostros, Placas, Objetos, Movimiento), selector de cámara, rango de fechas en calendario y rangos de horarios en formato de 24 horas.
-  * **Petición con Normalización Defensiva:** Llama a `searchForense(params)`. Dado que la base de datos de producción puede retornar URLs relativas para capturas e imágenes, la capa del servicio API las intercepta en segundo plano y les concatena el dominio activo de producción en tiempo real.
-  * **Estados Fluidos de Carga:** Controla estados visuales mediante un spinner de actividad centralizado (`loadingResults`) y muestra un banner elegante de *"No se encontraron resultados"* si la consulta no regresa filas.
+  * **Formulario de Filtros de Red:** Expone componentes selectores para acotar la búsqueda por tipo de analítica (Rostros, Placas, Objetos, Movimiento), cámara de origen, y un rango de fechas y horas operativas.
+  * **Consumo de API con Mapeo CamelCase:** Llama a la función `searchForense(params)` en [`services/api.ts`](file:///d:/app_sivi/AliceGuardianApp/services/api.ts). Dado que las rutas de imágenes relativas guardadas por el backend pueden carecer de dominio absoluto, la función API intercepta y concatena el dominio activo del workspace en caliente para garantizar que la imagen se renderice adecuadamente en el APK.
+  * **Paginación Dinámica:** Implementa un indicador de carga (`loadingResults`) y maneja estados vacíos elegantes si el servidor devuelve cero filas.
 
 ---
 
 ### 4. 🚨 Centro de Alertas Histórico y en Vivo (Alertas)
-* **Archivo Principal:** `app/(tabs)/alerts.tsx`
-* **Lógica Interna:**
-  * **Doble Modo de Visualización:** Permite alternar mediante un switch en la barra superior entre vista en **Lista** (tarjetas informativas detalladas) y vista en **Cuadrícula** (grilla compacta de dos columnas).
-  * **Modal de Detalle Premium ("Cuadritos" Estilo Web):** Al pulsar una alerta en cuadrícula, abre un modal completo que extrae la información del objeto remoto:
-    * **Panel Dual de Imágenes:** Jala la captura del rostro recortado (`face_detected_url` con dominio absoluto) y la evidencia completa (`url_evidence`).
-    * **Grilla de Datos:** Recrea las tarjetas de visualización de la web (Dispositivo, Motivo, Etiquetas literales en arreglo, Probabilidad de precisión en porcentaje).
-    * **Parseo de `vinfo`:** Analiza la cadena de texto JSON del campo `vinfo` para extraer y renderizar en pantalla las horas de programación del calendario y la frecuencia de la regla del servidor de producción.
-  * **Sincronización Reactiva de Contadores:** Los contadores del turno superior ("Confirmadas" y "Falsas") se actualizan dinámicamente. Al resolver una alerta pulsando "Confirmar" o "Falso Positivo" desde el modal o la lista, se incrementan instantáneamente (+1 interactivo).
+* **Archivo Principal:** [`app/(tabs)/alerts.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/alerts.tsx)
+* **Lógica Interna y Sincronización en Tiempo Real:**
+  * **Suscripción de Sockets Activa:** Al montarse, el componente inicializa la suscripción al socket en vivo a través del singleton de red `wsService`:
+    ```typescript
+    wsService.connect();
+    const unsubscribe = wsService.subscribe((payload) => { ... });
+    ```
+  * **Filtrado y Mapeo de Smart Events:**
+    - Ignora y descarta eventos de telemetría de alta frecuencia (`alarm_stats`, `alarm_throughput`, `data`, `ping`, `pong`, etc.).
+    - Solo añade a la lista eventos reales que tengan reglas activas de analítica (`ruleId`, `rule_id` o `vinfo`).
+    - Traduce el ID lógico de la cámara que reportó el evento a un nombre legible del dispositivo cruzándolo con el mapa `devicesMapRef.current` precargado.
+    - Identifica el tipo de evento y lo clasifica bajo un tema cromático en la UI (Intrusión, Rostro, Vehículo, Métrica, Crítica, Activo).
+    - Agrega el nuevo objeto de alerta al inicio del estado de alertas local (`setAlerts`) controlando que el buffer no exceda los 100 elementos (`.slice(0, 100)`).
+  * **Popup Emergente en Caliente (Banners):** Si la pestaña de alertas está activa en pantalla (`isFocusedRef.current === true`), la llegada de una nueva alerta activa instantáneamente un banner animado de notificación superior (`triggerRealTimePopup`) y reproduce el audio de alerta de seguridad en el dispositivo móvil si las preferencias de sonido (`soundEnabled`) están activadas.
+  * **Modal de Detalle Estilo Web:** Al pulsar una tarjeta, se abre un modal de alta fidelidad:
+    - **Panel Dual de Evidencias:** Muestra de forma paralela la captura del recorte (ej: el rostro o placa detectados) y la escena general completa de la cámara IP.
+    - **Parseo de Reglas e Intervalos (`vinfo`):** Convierte el string JSON guardado en el campo `vinfo` para extraer datos sobre el horario permitido de la regla y el cooldown del servidor.
+  * **Confirmación de Alertas:** El operador puede presionar "Confirmar Alerta" o "Falso Positivo", lo cual invoca a `classifyWorkspacesEvent(eventId, classification)`. La UI ejecuta una actualización optimista en los contadores locales para una experiencia táctil instantánea.
 
 ---
 
 ### 5. ⚙️ Reglas de Analíticas (Eventos)
-* **Archivo Principal:** `app/(tabs)/events.tsx`
+* **Archivo Principal:** [`app/(tabs)/events.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/events.tsx)
 * **Lógica Interna:**
-  * **Mapeo Automatizado de Alarmas:** Llama a `getAlarms()`, el cual consume el endpoint `/mobile/workspaces/alarms/configurations` a través de la pasarela API Gateway, iterando automáticamente todas las páginas disponibles hasta acumular todas las reglas configuradas.
-  * **Clasificador:** Clasifica las alarmas complejas del servidor en cuatro categorías reconocibles en el móvil (`FACE` para rostros, `LPR` para patentes, `OBJECT` para objetos, `ACTION` para intrusiones/movimiento).
-  * **Cámara-Rules Sync:** Cuenta cuántas cámaras físicas tienen asignada esa regla específica analizando la propiedad remota `Detail_device_alarm.length`.
-  * **Manejo de Estados Persistentes:** Almacena localmente las activaciones del switch a través de un gestor de estados de React (`localActiveStates`) para asegurar una respuesta visual inmediata.
-  * **Resiliencia Automática (Fallback de Red):** Si el servidor de producción no está disponible, el sistema detecta la falla de red y carga dinámicamente un conjunto de datos ficticios locales (mocks de alta calidad) para mantener la app 100% interactiva sin cerrarse o lanzar excepciones visuales críticas al usuario.
+  * **Consumo de Alarmas de Red:** Realiza llamadas paginadas hacia `/mobile/workspaces/alarms/configurations` para listar todas las reglas activas de IA del workspace.
+  * **Asociación de Dispositivos:** Calcula y muestra el número de cámaras asignadas a cada regla analizando la propiedad `Detail_device_alarm.length`.
+  * **Toggles Reactivos de Estado:** Mantiene un estado reactivo local (`localActiveStates`) para los interruptores de encendido/desactivación de la regla. Al conmutar el switch, se actualiza el estado de forma optimista y se lanza la petición HTTP POST de actualización.
+  * **Resiliencia ante Caídas de Servidor:** Si la petición falla por problemas de cobertura móvil o caída del backend, el componente captura el error y mantiene los switches funcionales de forma simulada para evitar que la interfaz se congele.
 
 ---
 
 ### 6. ⚙️ Panel de Ajustes (Ajustes)
-* **Archivo Principal:** `app/(tabs)/settings.tsx`
+* **Archivo Principal:** [`app/(tabs)/settings.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/settings.tsx)
 * **Lógica Interna:**
-  * **Acceso desde UI:** Se accede directamente desde la rueda dentada (ícono de Ajustes) en el panel superior de la pantalla del Dashboard de Administrador (`AdminDashboard.tsx`). En el caso de SuperAdmin, interactúa mediante un modal interno y permite también la navegación si fuera requerido.
-  * **Resolución de Perfil y Sesión:**
-    * Resuelve el nombre completo del usuario a partir del estado global de Zustand (`userData`), evaluando los atributos `first_name`, `lastName`, `Username` o `username`.
-    * Determina el rol de manera condicional (ej. `SUPERADMIN` o `ADMIN`).
-    * Identifica el Workspace activo o suplantado (`impersonatedWorkspace || activeWorkspace`) para mostrar su respectivo nombre en la cabecera del perfil.
-  * **Cierre de Sesión Seguro:** Al presionar "Cerrar Sesión Segura", ejecuta la acción `clearSession()` de la Zustand Store. Esta acción limpia de forma segura las credenciales de la memoria de la aplicación y remueve los datos persistentes de `Expo Secure Store`, provocando que el enrutador central de la app (`app/index.tsx`) detecte que no hay token JWT válido y redirija automáticamente al usuario al flujo de `/login`.
+  * **Navegación e Identidad:** Muestra el perfil del usuario resolviendo su nombre de Zustand (`first_name`, `lastName` o `username`). Identifica si se encuentra en un flujo de personificación de superusuario (`impersonatedWorkspace`) y dibuja un banner superior indicando la sucursal que está operando en ese instante.
+  * **Cierre de Sesión Seguro (`clearSession`):** Al presionar "Cerrar Sesión", borra todos los tokens JWT y configuraciones del dominio de Zustand y remueve físicamente los ítems de `SecureStore` (como `jwt_token`, `workspace_sessions` y contraseñas seguras guardadas), forzando una redirección instantánea a `/(auth)/login`.
 
 ---
 
 ### 7. 🎛️ Configuración Avanzada de Alarma y Región de Interés (Config. Evento / ROI)
-* **Archivo Principal:** `app/(tabs)/event-config.tsx`
+* **Archivo Principal:** [`app/(tabs)/event-config.tsx`](file:///d:/app_sivi/AliceGuardianApp/app/(tabs)/event-config.tsx)
 * **Lógica Interna:**
-  * **Acceso desde UI:** Se navega a esta pantalla cuando el usuario pulsa sobre cualquiera de las tarjetas de alarmas registradas en la pestaña de Eventos (`app/(tabs)/events.tsx`). La ruta requiere el parámetro dinámico `id` de la alarma seleccionada.
-  * **Gestión de Estados Reactivos y Caché (React Query):**
-    * Recupera la información detallada de la regla de forma asíncrona mediante `@tanstack/react-query` llamando a la función `getWorkspaceAlarmConfigurationDetail(String(id))`.
-    * Al guardar las modificaciones, ejecuta en paralelo las peticiones `updateWorkspaceAlarmConfiguration()` (para actualizar el estado de la alarma y los parámetros de acción en base de datos) y `updateWorkspaceAlarmPolygons()` (si la alarma tiene polígonos asociados a su región de interés).
-    * Al completarse con éxito, invalida las queries en caché (`alarms` y `alarm-detail`) para asegurar que la UI muestre los datos frescos y redirige de vuelta al listado de eventos (`app/(tabs)/events`).
-  * **Vinculación Dinámica de Cámaras y Streams:** Resuelve la correspondencia de la cámara asociada a la regla cruzando la información con la lista completa de dispositivos del workspace (obtenidos con `getDevices()`). Esto permite mapear IDs lógicos y UUIDs físicos para construir el stream correcto del reproductor en vivo (`{deviceId}/1`).
-  * **Parseador de Reglas Específicas:** Mapea e itera las diferentes reglas complejas de analítica asociadas a la alarma (`Detail_rule_obj_alarm`, `Detail_rule_face__alarm`, `Detail_rule_lpr__alarm`, `Detail_rule_action_alarm`), extrayendo el tipo de analítica, el estado activo/inactivo, las etiquetas vinculadas (ej. `person`), la precisión mínima/probabilidad y los contadores.
-  * **Canvas Interactivo SVG y Gestos (Region of Interest):**
-    * Dibuja un polígono coloreado en pantalla con vértices redondos arrastrables para definir la zona en la que la analítica del servidor de producción debe alertar.
-    * Utiliza el API nativo `PanResponder` de React Native para capturar gestos de arrastre táctiles y mapear las posiciones de los puntos en tiempo real, normalizando las coordenadas en un plano de 0.0 a 1.0.
-    * Muestra un listado dinámico de las coordenadas relativas (%) de cada punto del polígono.
-  * **Reproductor WebRTC WHEP / Fallback Integrado:**
-    * Integra un switch y el botón "Iniciar Video en Vivo" que monta un componente `<WebView>` de React Native.
-    * Dicho WebView carga de forma segura la URL WebRTC WHEP generada a partir de `getWebRtcUrl(resolvedCamera)` inyectando el token JWT de la sesión correspondiente en la URL para autenticar el stream en MediaMTX.
-    * Si no se inicia la reproducción, muestra una imagen de marcador de posición de cámara de alta fidelidad desde un recurso estático de red.
-
-
+  * **React Query Lifecycle:** Utiliza `@tanstack/react-query` para gestionar la asincronía y el cacheo de los detalles de la alarma mediante `getWorkspaceAlarmConfigurationDetail(id)`. Al confirmar los cambios en la pantalla, se ejecutan peticiones concurrentes para actualizar datos generales de la regla y polígonos, invalidando después las claves de query `['alarms']` y `['alarm-detail']` para asegurar consistencia total.
+  * **Editor de ROI con Canvas SVG Interactivo:**
+    - Renderiza una imagen estática o WebView de la cámara como fondo y superpone un elemento `<Svg>` que dibuja un polígono dinámico a partir de un arreglo de coordenadas normalizadas `[[x1,y1], [x2,y2], ...]`.
+    - **Algoritmo de Interacción Táctil (PanResponder):**
+      - Al presionar sobre el Canvas, se capturan las coordenadas `locationX` y `locationY` del evento de toque.
+      - **Detección de Vértice más Cercano (Fórmula de Pitágoras):** Compara el toque contra los vértices del polígono escalados al tamaño actual de la pantalla de visualización:
+        $$\text{Distancia} = \sqrt{(x_{vertex} \cdot \text{width} - x_{touch})^2 + (y_{vertex} \cdot \text{height} - y_{touch})^2}$$
+      - Si la distancia calculada al vértice más cercano es menor a **40 píxeles lógicos**, se almacena su índice en `activePointIndex.current`.
+      - Al mover el dedo, el manejador `onPanResponderMove` calcula las nuevas coordenadas relativas dividiendo la posición táctil entre las dimensiones físicas de la vista en pantalla:
+        $$x_{new} = \max\left(0, \min\left(1, \frac{x_{touch}}{\text{width}}\right)\right)$$
+        $$y_{new} = \max\left(0, \min\left(1, \frac{y_{touch}}{\text{height}}\right)\right)$$
+      - Actualiza el estado del polígono en formato JSON y redibuja la figura SVG instantáneamente en pantalla a tiempo real.

@@ -1,4 +1,4 @@
-import { WORKSPACES, PROD_API_DOMAIN } from '../constants/config';
+import { WORKSPACES, PROD_API_DOMAIN, PROD_MEDIA_DOMAIN } from '../constants/config';
 import { useAppStore } from './store';
 
 export function parseUTCDate(dateStr: string | Date | null | undefined): Date {
@@ -44,7 +44,7 @@ export function getMediaUrl(path: string | null | undefined, domain: string | nu
       );
 
       if (wsConfig && wsConfig.domain) {
-        const proto = wsConfig.https ? 'https' : 'http';
+        const proto = 'https';
         const finalUrl = `${proto}://${wsConfig.domain}${relativePath}`;
         console.log(`[MEDIA] 🔄 Local→Public: ${path} → ${finalUrl}`);
         return finalUrl;
@@ -80,7 +80,7 @@ export function getMediaUrl(path: string | null | undefined, domain: string | nu
     const wsConfig = WORKSPACES.find((w) => w.id.toLowerCase() === currentWsId.toLowerCase());
 
     if (wsConfig && wsConfig.domain) {
-      const proto = wsConfig.https ? 'https' : 'http';
+      const proto = 'https';
       const finalUrl = `${proto}://${wsConfig.domain}${cleanPath}`;
       console.log(`[MEDIA] Local->Public: ${path} -> ${finalUrl}`);
       return finalUrl;
@@ -548,7 +548,7 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
 
     const activeSession = workspaceSessions?.find(s => s.workspace?.toLowerCase() === wsId.toLowerCase());
 
-    const [camsRes, alertsRes, consolidado] = await Promise.all([
+    const [camsRes, alertsRes, consolidado, devicesRes] = await Promise.all([
       getWorkspaceState().catch(() => null),
       activeSession ? getWorkspacesEvents({
         sessions: [activeSession],
@@ -564,7 +564,8 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
         timezone: 'America/Lima',
         from: dateFromISO,
         to: dateToISO
-      }).catch(() => null)
+      }).catch(() => null),
+      getDevices().catch(() => null)
     ]);
 
     stateRes = camsRes;
@@ -591,7 +592,20 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
     let offCameras = 0;
     let storagePercent = 38;
 
-    if (stateRes && stateRes.states) {
+    // 1. PRIORIDAD: Conteo dinámico de la lista de dispositivos (Caso Local / Real Club)
+    if (devicesRes && Array.isArray(devicesRes.rows) && devicesRes.rows.length > 0) {
+      devicesRes.rows.forEach((camera: any) => {
+        const primaryStatus = camera.rtspStatus?.primary;
+        // Consideramos activa la cámara si el ping está 'online' o si es 'unknown' (aún no verificado pero no caído)
+        if (primaryStatus === 'online' || primaryStatus === 'unknown') {
+          onCameras++;
+        } else {
+          offCameras++;
+        }
+      });
+    }
+    // 2. PRIORIDAD NUBE: Si no hay dispositivos, verificar 'states.devices' (Caso Nube)
+    else if (stateRes && stateRes.states && stateRes.states.devices) {
       const devices = stateRes.states.devices || {};
       const devKeys = Object.keys(devices);
       if (devKeys.length > 0) {
@@ -603,16 +617,23 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
           }
         });
       } else {
-        onCameras = 8;
-        offCameras = 2;
+        onCameras = 0;
+        offCameras = 0;
       }
+    }
+    // 3. FALLBACK FINAL: En caso de caída del servidor o sin datos reales, mostrar 0
+    else {
+      onCameras = 0;
+      offCameras = 0;
+    }
 
-      if (stateRes.states.disk0 && typeof stateRes.states.disk0.percent === 'number') {
+    // Normalización de disco (Soporte para estructura estándar y legacy)
+    if (stateRes) {
+      if (stateRes.metrics?.health?.disk0?.percent !== undefined) {
+        storagePercent = stateRes.metrics.health.disk0.percent;
+      } else if (stateRes.states?.disk0 && typeof stateRes.states.disk0.percent === 'number') {
         storagePercent = stateRes.states.disk0.percent || 38;
       }
-    } else {
-      onCameras = 8;
-      offCameras = 2;
     }
 
     const allRows = (alertsPage1Res && Array.isArray(alertsPage1Res.rows)) ? alertsPage1Res.rows : [];
@@ -848,8 +869,8 @@ export async function getDashboard(workId?: string | null, interval: string = 'h
     console.error("Error al sintetizar el dashboard:", error);
     return {
       summary: {
-        cameras: { on: 8, off: 2 },
-        storage: { percent: 45, days: 30 }
+        cameras: { on: 0, off: 0 },
+        storage: { percent: 0, days: 0 }
       },
       alerts24h: { face: 0, lpr: 0, object: 0, intrusion: 0 },
       metrics: { total: 0, resolved: 0, unresolved: 0, effective: "0%" },
@@ -929,18 +950,6 @@ export async function getAlarms(page = 1) {
   return { rows: uniqueRows };
 }
 
-export async function getAlerts(page = 1) {
-  const { impersonatedWorkspace, activeWorkspace } = useAppStore.getState();
-  const wsId = (impersonatedWorkspace || activeWorkspace)?.id || '';
-  const res = await fetchGateway('/mobile/workspaces/events', {
-    eventType: 'alert',
-    page,
-    limit: 30
-  });
-  const wsData = res.workspaces?.find((w: any) => w.workspace?.toLowerCase() === wsId.toLowerCase());
-  const rows = wsData?.rows || [];
-  return normalizeAlertsData({ rows });
-}
 
 export async function getDevices(page = 1) {
   const { impersonatedWorkspace, activeWorkspace } = useAppStore.getState();
@@ -1225,4 +1234,66 @@ export async function getWorkspaceAlarmConfigurationDetail(alarmId: number | str
 
   return wsData.alarm;
 }
+
+export interface StreamUrls {
+  webrtc: string;
+  hls: string;
+}
+
+export function getCameraStreams(camera: { id: number; deviceId: string; rtsp?: string }, isLocal: boolean): StreamUrls {
+  if (!isLocal) {
+    // Caso Cloud: Mantiene la extracción actual desde el RTSP
+    const rtspUrl = camera.rtsp || '';
+    const match = rtspUrl.match(/^rtsp:\/\/([^:/]+)(?::(\d+))?\/(.+)$/);
+    if (match) {
+      const host = match[1];
+      const path = match[3];
+      return {
+        webrtc: `https://${host}/webrtc/${path}/whep`,
+        hls: `https://${host}:8888/${path}/index.m3u8`
+      };
+    }
+    // Fallback Cloud
+    const fallbackPath = `${camera.id}-${camera.deviceId}`;
+    return {
+      webrtc: `https://${PROD_MEDIA_DOMAIN}/webrtc/${fallbackPath}/whep`,
+      hls: `https://${PROD_MEDIA_DOMAIN}:8888/${fallbackPath}/index.m3u8`
+    };
+  }
+
+  // Caso Local / FRP: Resolución dinámica por la fórmula SIVI
+  const { activeDomain, activeWorkspace } = useAppStore.getState();
+  const domain = activeDomain || 'local.imperium.pe:19090';
+  
+  const parts = domain.split(':');
+  // Siempre se fuerza a local.imperium.pe para garantizar SSL handshake exitoso
+  const host = 'local.imperium.pe';
+    
+  const apiPort = parts[1] ? parseInt(parts[1], 10) : 19090;
+
+  let webrtcPort = 18890;
+  let hlsPort = 18891;
+
+  // Aplicar la fórmula dinámica FRP si el puerto API está en el rango estándar (19090 - 58090)
+  if (apiPort >= 19090 && apiPort <= 58090 && (apiPort - 19090) % 1000 === 0) {
+    const id = 1 + (apiPort - 19090) / 1000;
+    webrtcPort = 18890 + (id - 1) * 1000;
+    hlsPort = 18891 + (id - 1) * 1000;
+  } else {
+    // Fallback para sedes con puertos sueltos/heredados fuera de la fórmula estándar
+    const currentWsId = activeWorkspace?.id;
+    const wsConfig = WORKSPACES.find(w => w.id.toLowerCase() === currentWsId?.toLowerCase());
+    if (wsConfig?.webrtcPort) webrtcPort = wsConfig.webrtcPort;
+    if (wsConfig?.hlsPort) hlsPort = wsConfig.hlsPort;
+  }
+
+  // Path de stream con nomenclatura fija /1/ requerida para local
+  const streamPath = `${camera.id}-${camera.deviceId}/1/`;
+
+  return {
+    webrtc: `https://${host}:${webrtcPort}/${streamPath}`,
+    hls: `https://${host}:${hlsPort}/${streamPath}index.m3u8`
+  };
+}
+
 

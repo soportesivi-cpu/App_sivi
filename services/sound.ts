@@ -1,24 +1,23 @@
-import { Audio } from 'expo-av';
+import { createAudioPlayer } from 'expo-audio';
 
-let soundInstance: Audio.Sound | null = null;
+let soundPlayer: any = null;
 
 /**
  * Reproduce un sonido de alerta tecnológico premium y nítido.
- * Utiliza expo-av para cargar y reproducir audio desde un CDN optimizado.
+ * Utiliza expo-audio para cargar y reproducir audio desde un CDN optimizado.
  */
 export async function playNotificationSound() {
   try {
-    // Si ya existe una instancia reproduciéndose, la detenemos y descargamos
-    if (soundInstance) {
-      await soundInstance.unloadAsync().catch(() => {});
-      soundInstance = null;
+    // Si ya existe una instancia reproduciéndose, la liberamos
+    if (soundPlayer) {
+      try {
+        soundPlayer.release();
+      } catch (err) {}
+      soundPlayer = null;
     }
 
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav' },
-      { shouldPlay: true, volume: 1.0 }
-    );
-    soundInstance = sound;
+    soundPlayer = createAudioPlayer('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav');
+    soundPlayer.play();
   } catch (e) {
     console.warn('[Sound] Error al reproducir el sonido de notificación:', e);
   }

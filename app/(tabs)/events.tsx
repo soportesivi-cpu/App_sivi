@@ -349,30 +349,10 @@ const getStyles = (isDark: boolean) => {
       flex: 1,
       justifyContent: 'center'
     },
-    titleBadgeRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 4,
-      flexWrap: 'wrap',
-      gap: 6
-    },
     eventName: {
       color: themeColors.text,
       fontSize: 13,
       fontWeight: '800'
-    },
-    typeBadge: {
-      backgroundColor: Colors.brand.primary + '15',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 6,
-      borderWidth: 1,
-      borderColor: Colors.brand.primary + '30'
-    },
-    typeBadgeText: {
-      color: Colors.brand.primary,
-      fontSize: 9,
-      fontWeight: '900'
     },
     subtext: {
       color: themeColors.textSecondary,

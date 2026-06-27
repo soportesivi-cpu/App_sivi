@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, RefreshControl, Alert, BackHandler } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAppStore } from '../services/store';
 import { getDashboard, getWorkspaces } from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
@@ -61,6 +62,24 @@ export default function AdminDashboard() {
   const [selectedInterval, setSelectedInterval] = useState<'hoy' | 'ayer' | 'semana' | '15dias' | '30dias'>('hoy');
 
   const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
+
+  // Intercepta el botón de atrás físico para regresar al lobby de SuperAdmin en vez de salir de la aplicación
+  useFocusEffect(
+    useCallback(() => {
+      if (isSuperAdmin && impersonatedWorkspace) {
+        const onBackPress = () => {
+          setImpersonatedWorkspace(null);
+          return true; // Previene la acción por defecto (minimizar o cerrar)
+        };
+
+        const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+        return () => {
+          subscription.remove();
+        };
+      }
+    }, [isSuperAdmin, impersonatedWorkspace, setImpersonatedWorkspace])
+  );
   const currentWs = impersonatedWorkspace || activeWorkspace;
 
   async function handleRefresh() {

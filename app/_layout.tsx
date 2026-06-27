@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { useEffect } from 'react';
 import { useAppStore } from '../services/store';
 import { wsService } from '../services/websocket';
+import { setAudioModeAsync } from 'expo-audio';
 
 const queryClient = new QueryClient();
 
@@ -16,6 +17,12 @@ export default function RootLayout() {
 
   useEffect(() => {
     hydrate();
+    setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'mixWithOthers',
+    }).catch((err) => {
+      console.warn('[RootLayout] Error al configurar el modo de audio global:', err);
+    });
   }, []);
 
   /**

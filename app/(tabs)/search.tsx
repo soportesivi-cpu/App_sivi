@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   Platform,
   StatusBar,
-  Switch,
   Alert,
   FlatList
 } from 'react-native';
@@ -21,6 +20,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
 import { getDevices, searchForense, getWorkspacesDevices, confirmAlert, falsePositiveAlert } from '../../services/api';
 import { Colors, Layout } from '../../constants/theme';
+
+const ANALYTIC_TRANSLATIONS: Record<string, string> = {
+  'Todas': 'Todas',
+  'Face': 'Rostro',
+  'LPR': 'Placas (LPR)',
+  'Object': 'Objetos',
+  'Action': 'Acciones'
+};
 
 const { width } = Dimensions.get('window');
 
@@ -276,6 +283,29 @@ const DatePickerModalContent = ({ initialDate, onConfirm }: any) => {
   );
 };
 
+// ─── Modal de Selección Genérico ──────────────────────────────────────────
+const SelectionModal = React.memo(({ title, visible, onClose, children }: { title: string, visible: boolean, onClose: () => void, children: React.ReactNode }) => {
+  const { isDarkMode } = useAppStore();
+  const styles = getStyles(isDarkMode);
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
+        <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+           <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{title}</Text>
+              <TouchableOpacity onPress={onClose}>
+                 <Ionicons name="close" size={24} color={isDarkMode ? '#ffffff' : '#111827'} />
+              </TouchableOpacity>
+           </View>
+           <ScrollView style={styles.modalBody}>
+              {children}
+           </ScrollView>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+});
+
 // ─── Tarjeta de resultado con imagen segura ────────────────────────────────
 const ResultCard = React.memo(({ res, viewMode, onPress }: { res: any; viewMode: 'grid' | 'list'; onPress: () => void }) => {
   const { isDarkMode } = useAppStore();
@@ -485,6 +515,49 @@ const ResultDetailModal = ({ item, onClose }: { item: any | null; onClose: () =>
   const tags = Array.isArray(raw.tags) ? raw.tags : [];
   const listName = raw.list_name || raw.listName || null;
 
+  let vinfoObj: any = {};
+  if (raw.vinfo) {
+    try {
+      vinfoObj = typeof raw.vinfo === 'string' ? JSON.parse(raw.vinfo) : raw.vinfo;
+    } catch (e) {
+      vinfoObj = {};
+    }
+  }
+  const smartEventName = 
+    vinfoObj?.name || 
+    vinfoObj?.alarm_name || 
+    vinfoObj?.alarmName || 
+    raw.motive_categorie || 
+    raw.name_categorie || 
+    raw.title || 
+    null;
+
+  const isConfirmed = raw.is_confirmed === true || raw.isConfirmed === true;
+  const isFP = raw.is_fp === true || raw.isFp === true;
+  const isIgnored = raw.is_ignored === true || raw.isIgnored === true || raw.state === 'ignored';
+
+  let statusLabel = 'Pendiente';
+  let statusDetail = 'Este evento aún no ha sido atendido.';
+  let statusColor = '#2E9BFF';
+  let statusIcon = 'time-outline';
+
+  if (isConfirmed) {
+    statusLabel = 'Alerta Confirmada';
+    statusDetail = 'El operador ha verificado y confirmado este evento.';
+    statusColor = '#4CAF50';
+    statusIcon = 'checkmark-circle';
+  } else if (isFP) {
+    statusLabel = 'Falso Positivo';
+    statusDetail = 'El operador marcó este evento como falso positivo.';
+    statusColor = '#FF9800';
+    statusIcon = 'close-circle';
+  } else if (isIgnored) {
+    statusLabel = 'Alerta Ignorada';
+    statusDetail = 'El operador decidió ignorar este evento.';
+    statusColor = '#9E9E9E';
+    statusIcon = 'eye-off-outline';
+  }
+
   const handleConfirm = async () => {
     setConfirming(true);
     try {
@@ -563,6 +636,7 @@ const ResultDetailModal = ({ item, onClose }: { item: any | null; onClose: () =>
             <View style={styles.detailMetaGrid}>
               <DetailMetaItem icon="videocam" label="Cámara" value={item.cam} />
               <DetailMetaItem icon="bar-chart" label="Confianza" value={`${item.confidence}%`} />
+              {smartEventName && <DetailMetaItem icon="flash" label="Smart Event" value={smartEventName} />}
               {plate && <DetailMetaItem icon="car" label="Placa" value={plate} />}
               {faceName && <DetailMetaItem icon="person" label="Persona" value={faceName} />}
               {listName && <DetailMetaItem icon="list" label="Lista" value={listName} />}
@@ -582,30 +656,25 @@ const ResultDetailModal = ({ item, onClose }: { item: any | null; onClose: () =>
               </View>
             )}
 
-            {/* Botones de Acción */}
-            <View style={styles.detailActions}>
-              <TouchableOpacity
-                style={[styles.detailActionBtn, styles.detailActionConfirm]}
-                onPress={handleConfirm}
-                disabled={confirming}
-              >
-                {confirming ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                    <Text style={styles.detailActionText}>Confirmar</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.detailActionBtn, styles.detailActionFP]}
-                onPress={handleFalsePositive}
-                disabled={confirming}
-              >
-                <Ionicons name="close-circle" size={18} color="#fff" />
-                <Text style={styles.detailActionText}>Falso Positivo</Text>
-              </TouchableOpacity>
+            {/* Estado de Resolución/Atención */}
+            <View style={{ marginBottom: 40, marginTop: 10 }}>
+              <Text style={styles.detailSectionLabel}>ESTADO DE ATENCIÓN</Text>
+              <View style={{
+                backgroundColor: statusColor + '15',
+                borderColor: statusColor + '40',
+                borderWidth: 1,
+                padding: 14,
+                borderRadius: 14,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12
+              }}>
+                <Ionicons name={statusIcon as any} size={22} color={statusColor} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: statusColor, fontSize: 15, fontWeight: '800' }}>{statusLabel}</Text>
+                  <Text style={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)', fontSize: 13.5, marginTop: 3, lineHeight: 18 }}>{statusDetail}</Text>
+                </View>
+              </View>
             </View>
           </ScrollView>
         </View>
@@ -687,7 +756,7 @@ export default function SearchScreen() {
               ...dev,
               id: dev.id || `dev-${Math.random()}`,
               workspaceLabel: ws.workspace,
-              name: `${dev.name} (${ws.workspace})`
+              name: dev.name
             });
           });
         });
@@ -867,24 +936,6 @@ function normalizarTexto(texto: string): string {
     return `${selectedCameras.length} Cámaras`;
   };
 
-  const SelectionModal = ({ title, visible, onClose, children }: { title: string, visible: boolean, onClose: () => void, children: React.ReactNode }) => (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-           <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{title}</Text>
-              <TouchableOpacity onPress={onClose}>
-                 <Ionicons name="close" size={24} color={isDarkMode ? '#ffffff' : '#111827'} />
-              </TouchableOpacity>
-           </View>
-           <ScrollView style={styles.modalBody}>
-              {children}
-           </ScrollView>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-
   return (
     <View style={styles.container}>
       {/* TOP BAR SIVI */}
@@ -930,7 +981,7 @@ function normalizarTexto(texto: string): string {
               <View style={styles.filterRow}>
                 <FilterBox 
                   label="TIPO DE ANALÍTICA" 
-                  value={selectedAnalytic} 
+                  value={ANALYTIC_TRANSLATIONS[selectedAnalytic] || selectedAnalytic} 
                   icon="chevron-down" 
                   onPress={() => setActiveModal('analytic')} 
                 />
@@ -969,7 +1020,9 @@ function normalizarTexto(texto: string): string {
                   style={[styles.modalItem, selectedAnalytic === type && styles.modalItemActive]}
                   onPress={() => { setSelectedAnalytic(type); setActiveModal(null); }}
                 >
-                   <Text style={[styles.modalItemText, selectedAnalytic === type && styles.modalItemTextActive]}>{type}</Text>
+                   <Text style={[styles.modalItemText, selectedAnalytic === type && styles.modalItemTextActive]}>
+                     {ANALYTIC_TRANSLATIONS[type] || type}
+                   </Text>
                    {selectedAnalytic === type && <Ionicons name="checkmark-circle" size={20} color={Colors.brand.primary} />}
                 </TouchableOpacity>
               ))}
@@ -1140,10 +1193,30 @@ function getStyles(isDarkMode: boolean) {
     resCard: { width: (width - 44) / 2, backgroundColor: theme.surface, borderRadius: 18, marginBottom: 15, overflow: 'hidden', borderWidth: 1, borderColor: theme.border },
     resThumb: { width: '100%', aspectRatio: 16 / 9 },
     resThumbSmall: { width: 120, height: '100%' },
-    thumbOverlay: { ...StyleSheet.absoluteFillObject, padding: 8, justifyContent: 'space-between', flexDirection: 'row' },
-    camBadge: { backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, height: 20, borderWidth: 0.5, borderColor: '#ffffff20' },
+    thumbOverlay: { ...StyleSheet.absoluteFillObject, padding: 8 },
+    camBadge: {
+      position: 'absolute',
+      top: 8,
+      left: 8,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      height: 20,
+      borderWidth: 0.5,
+      borderColor: '#ffffff20',
+      maxWidth: '80%',
+    },
     camBadgeText: { color: Colors.brand.primary, fontSize: 11, fontWeight: '900' },
-    confBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, height: 20 },
+    confBadge: {
+      position: 'absolute',
+      bottom: 8,
+      right: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      height: 20,
+    },
     confHigh: { backgroundColor: '#4CAF50' },
     confMid: { backgroundColor: '#FF9800' },
     confText: { color: '#fff', fontSize: 11, fontWeight: '900' },

@@ -1,9 +1,11 @@
 # 🔄 Flujos de Datos, Ciclos de Vida y Diagramas de Secuencia (Mermaid.js)
+
 > **Documento 03:** Planos técnicos de secuencia y flujos de datos interactivos, diseñados para visualizarse en Mermaid.js y Markdown Live Preview.
 
 ---
 
 ## 🔐 1. Flujo de Inicio de Sesión y Selección de Workspaces
+
 Este diagrama detalla la secuencia de autenticación centralizada a través de la REST API y la persistencia segura del token JWT en el dispositivo móvil:
 
 ```mermaid
@@ -33,6 +35,7 @@ sequenceDiagram
 ---
 
 ## 🎥 2. Negociación Híbrida de Video (WebRTC / HLS)
+
 Este flujo detalla la negociación Peer-to-Peer a través del protocolo WHEP para transmisiones con latencia menor a un segundo, y la alternancia de reproducción en el móvil:
 
 ```mermaid
@@ -66,6 +69,7 @@ sequenceDiagram
 ---
 
 ## 📡 3. Recepción y Normalización de Eventos en Tiempo Real
+
 El siguiente flujo describe cómo se capturan las detecciones inteligentes de la nube mediante WebSockets y se transforman antes de renderizarse en el teléfono:
 
 ```mermaid
@@ -97,6 +101,7 @@ graph TD
 ---
 
 ## 🚨 4. Resolución de Alertas y Sincronización de Historial
+
 Flujo interactivo de toma de acciones desde la aplicación móvil y su sincronización inmediata con la interfaz:
 
 ```mermaid
@@ -122,3 +127,67 @@ sequenceDiagram
     UI-->>Operador: Muestra badge de estado actualizado e incrementa conteo en lista
 ```
 
+---
+
+## 📐 5. Edición Interactiva de Región de Interés (ROI)
+
+Este flujo detalla cómo se capturan los gestos táctiles para redibujar y guardar la región de interés (ROI) poligonal configurada para la analítica:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operador as Operador de Seguridad
+    participant UI as Config. Evento (event-config.tsx)
+    participant PR as PanResponder (React Native)
+    participant SVG as Canvas de Visualización (SVG)
+    participant RQ as React Query (useMutation)
+    participant API as Cliente API (api.ts)
+    participant Cloud as Servidor SIVI (BFF en la Nube)
+
+    Operador->>SVG: Presiona la pantalla sobre un vértice del polígono
+    PR->>UI: onPanResponderGrant(locationX, locationY)
+    Note over UI: Calcula distancia euclidiana a cada vértice<br/>Si es < 40 píxeles, activa el vértice (activePointIndex)
+    
+    Operador->>SVG: Arrastra el dedo por la pantalla
+    PR->>UI: onPanResponderMove(locationX, locationY)
+    Note over UI: Normaliza coordenadas: divisiones de posición táctil<br/>entre el ancho y alto del canvas (rango 0.0 a 1.0)
+    UI->>SVG: Actualiza coordenadas en caliente y redibuja polígono SVG
+
+    Operador->>UI: Suelta la pantalla y presiona "Guardar ROI"
+    UI->>RQ: Ejecuta updateWorkspaceAlarmPolygons Mutation
+    RQ->>API: updateWorkspaceAlarmPolygons(polygonsPayload)
+    API->>Cloud: POST /mobile/workspaces/alarms/configurations/polygons/update (JSON)
+    Cloud-->>API: Retorna { success: true }
+    API-->>RQ: Operación exitosa
+    Note over RQ: Invalida las llaves de caché 'alarms' y 'alarm-detail'
+    RQ-->>UI: Refresca interfaz y retorna al listado de eventos
+```
+
+---
+
+## 🔄 6. Reescritura Dinámica de URLs de Evidencia (Local a Público)
+
+Diagrama de secuencia de la reescritura que permite ver imágenes cargadas en servidores locales desde cualquier red externa:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Componente Vista (Alertas / Historial)
+    participant API as services/api.ts (getMediaUrl)
+    participant Store as Zustand Store (App Store State)
+    participant Config as constants/config.ts (WORKSPACES)
+
+    UI->>API: getMediaUrl("http://127.0.0.1:19090/alice-media/evidencia.jpg", domain)
+    Note over API: Identifica dominio local (127.0.0.1 / localhost)
+    
+    API->>Store: Obtiene impersonatedWorkspace o activeWorkspace ID
+    Store-->>API: Retorna id: "cmarket"
+    
+    API->>Config: Busca coincidencia de ID "cmarket" en WORKSPACES
+    Config-->>API: Retorna wsConfig: { id: "cmarket", domain: "cmarket.guardian.imperium.pe" }
+    
+    Note over API: Extrae path relativo "/alice-media/evidencia.jpg"<br/>Reescribe la URL anteponiendo dominio público
+    API-->>UI: Retorna "https://cmarket.guardian.imperium.pe/alice-media/evidencia.jpg"
+    
+    Note over UI: Carga imagen en UI usando ImageBackground o Image de React Native
+```

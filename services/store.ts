@@ -21,7 +21,7 @@ type AppState = {
   refreshWorkspacesSessions: () => Promise<{ success: boolean; total: number; failed: number; message: string }>;
 };
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   isHydrated: false,
   activeDomain: null,
   jwtToken: null,
@@ -100,10 +100,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   setImpersonatedWorkspace: (workspace) => {
     if (workspace) {
-      const currentDomain = useAppStore.getState().activeDomain;
+      const currentDomain = get().activeDomain;
       set({ impersonatedWorkspace: workspace, activeDomain: workspace.domain || currentDomain });
     } else {
-      const origWs = useAppStore.getState().activeWorkspace;
+      const origWs = get().activeWorkspace;
       set({ impersonatedWorkspace: null, activeDomain: origWs ? origWs.domain : null });
     }
   },
@@ -126,50 +126,61 @@ export const useAppStore = create<AppState>((set) => ({
 
   refreshWorkspacesSessions: async () => {
     try {
-      const email = useAppStore.getState().userData?.email;
-      const securePass = await SecureStore.getItemAsync('secure_user_pass');
-      if (!email || !securePass) {
-        return { success: false, total: 0, failed: 0, message: 'Falta usuario o contraseña persistida' };
+      const currentSessions = get().workspaceSessions;
+      if (!currentSessions || currentSessions.length === 0) {
+        return { success: false, total: 0, failed: 0, message: 'No hay sesiones de workspace activas' };
       }
 
-      const { autoLogin } = await import('./api');
-      const resultado = await autoLogin(email, securePass);
-      if (!resultado) {
-        return { success: false, total: 0, failed: 0, message: 'No se pudo re-autenticar con el servidor' };
+      const { getWorkspacesSummary } = await import('./api');
+      const summary = await getWorkspacesSummary(currentSessions);
+      if (!summary) {
+        return { success: false, total: 0, failed: 0, message: 'No se pudo obtener el estado de los workspaces' };
       }
 
-      const { workspace, data } = resultado;
-      // Actualizar la sesión en el store y SecureStore
-      await useAppStore.getState().setSession(
-        workspace.domain,
-        data.token,
-        data.jwt,
-        data.user,
-        workspace,
-        data.sessions
+      const validWorkspaces = summary.workspaces || [];
+      const failures = summary.failures || [];
+
+      // Filtrar y remover únicamente las sesiones con token inválido
+      const invalidWorkspaces = failures
+        .filter((f: any) => f.status === 'invalid_token')
+        .map((f: any) => (f.workspace || '').toLowerCase());
+
+      const updatedSessions = currentSessions.filter(
+        (s: any) => !invalidWorkspaces.includes((s.workspace || '').toLowerCase())
       );
 
-      // Si tenemos un workspace impersonado activo, actualicemos su token en memoria
-      const currentImpersonated = useAppStore.getState().impersonatedWorkspace;
+      // Si no quedan sesiones válidas (todas expiraron), cerramos sesión global
+      if (updatedSessions.length === 0) {
+        await get().clearSession();
+        return { success: false, total: 0, failed: failures.length, message: 'Sesión expirada. Por favor, inicie sesión nuevamente.' };
+      }
+
+      // Si cambió el listado de sesiones válidas, lo actualizamos en Zustand y SecureStore
+      if (updatedSessions.length !== currentSessions.length) {
+        await SecureStore.setItemAsync('workspace_sessions', JSON.stringify(updatedSessions));
+        set({ workspaceSessions: updatedSessions });
+      }
+
+      // Si tenemos un workspace impersonado activo y su sesión expiró, lo limpiamos
+      const currentImpersonated = get().impersonatedWorkspace;
       if (currentImpersonated) {
-        const matchingSession = data.sessions.find(
-          (s: any) => s.workspace?.toLowerCase() === (currentImpersonated.id || currentImpersonated.workspace || '').toLowerCase()
+        const impersonatedWsId = (currentImpersonated.id || currentImpersonated.workspace || '').toLowerCase();
+        const stillValid = updatedSessions.some(
+          (s: any) => (s.workspace || '').toLowerCase() === impersonatedWsId
         );
-        if (matchingSession) {
-          useAppStore.setState({
-            impersonatedWorkspace: {
-              ...currentImpersonated,
-              token: matchingSession.token || matchingSession.jwt
-            }
-          });
+        if (!stillValid) {
+          get().setImpersonatedWorkspace(null);
         }
       }
 
+      const failedCount = failures.length;
+      const successCount = validWorkspaces.length;
+
       return {
         success: true,
-        total: data.sessions.length,
-        failed: 0,
-        message: `Sincronizados ${data.sessions.length} workspaces`
+        total: updatedSessions.length,
+        failed: failedCount,
+        message: `Sincronizados ${successCount} workspaces.${failedCount > 0 ? ` (${failedCount} offline/fallidos)` : ''}`
       };
     } catch (e: any) {
       console.error('[STORE] Falló refresco silencioso de workspaces:', e);

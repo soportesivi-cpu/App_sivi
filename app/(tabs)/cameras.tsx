@@ -14,13 +14,13 @@ import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../../services/store';
-import { getDevices, getWorkspacesDevices, getMediaUrl, getWorkspacesEvents } from '../../services/api';
+import { getDevices, getWorkspacesDevices, getMediaUrl, getWorkspacesEvents, getCameraStreams } from '../../services/api';
 import { PROD_MEDIA_DOMAIN, WORKSPACES } from '../../constants/config';
 import Loading from '../../components/Loading';
 import { router } from 'expo-router';
 import { Colors, Layout } from '../../constants/theme';
 
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 
 type Camera = {
   id: number;
@@ -37,11 +37,6 @@ type Camera = {
     checkedAt?: string;
     source?: string;
   };
-  recording?: {
-    configured: boolean;
-    active: boolean;
-    source?: string;
-  };
 };
 
 type StreamState = 'checking' | 'connected' | 'disconnected';
@@ -56,20 +51,15 @@ export default function CamerasScreen() {
   const isLocal = currentWs?.type === 'local';
 
   const getWebViewBaseUrl = () => {
-    let effectiveDomain = domain;
-    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
-      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
-      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+    if (isFrpConnection()) {
+      return `https://local.imperium.pe`;
     }
+    let effectiveDomain = domain;
     const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
     if (isIpOrLocal && effectiveDomain) {
       const parts = effectiveDomain.split(':');
       const host = parts[0];
-      const apiPort = parts[1];
-      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
-        return `https://local.imperium.pe`;
-      }
-      return `http://${host}`;
+      return `https://${host}`;
     }
     return `https://${PROD_MEDIA_DOMAIN}`;
   };
@@ -77,11 +67,11 @@ export default function CamerasScreen() {
   const [selected, setSelected] = useState<Camera | null>(null);
   const [streamMode, setStreamMode] = useState<'hls' | 'webrtc'>('webrtc'); // Favorecemos webrtc como default
   const [searchQuery, setSearchQuery] = useState('');
+  const [manualRefresh, setManualRefresh] = useState(false);
 
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [streamStatus, setStreamStatus] = useState<Record<number, CameraStreamStatus>>({});
-  const [cameraThumbnails, setCameraThumbnails] = useState<Record<number, string>>({});
-  const [thumbnailCameraId, setThumbnailCameraId] = useState<number | null>(null);
+
 
   // Al abrir el modal de una cámara, seleccionamos por defecto WebRTC (WHEP)
   useEffect(() => {
@@ -106,7 +96,7 @@ export default function CamerasScreen() {
 
   const isRealclub = (currentWs?.id || '').toLowerCase() === 'realclub';
 
-  const { data: qData, isLoading: loading } = useQuery({
+  const { data: qData, isLoading: loading, refetch, isRefetching } = useQuery({
     queryKey: ['cameras', domain, activeSession, isRealclub],
     queryFn: async () => {
       if (isLocal || isRealclub) {
@@ -117,7 +107,14 @@ export default function CamerasScreen() {
       }
       return getWorkspacesDevices(activeSession);
     },
+    refetchInterval: 15000,
   });
+
+  const handleManualRefresh = async () => {
+    setManualRefresh(true);
+    await refetch();
+    setManualRefresh(false);
+  };
 
   const rawCameras = useMemo((): Camera[] => {
     if (isLocal || isRealclub) {
@@ -127,69 +124,89 @@ export default function CamerasScreen() {
     return wsData?.devices || [];
   }, [qData, isLocal, isRealclub]);
 
-  const filteredCameras = useMemo(() => {
-    return rawCameras.filter(cam => {
-      const isIpCam = cam.type?.toUpperCase() === 'IP_CAM';
-      return isIpCam && cam.name.toLowerCase().includes(searchQuery.toLowerCase());
-    });
-  }, [rawCameras, searchQuery]);
+  const ipCameras = useMemo((): Camera[] => {
+    return rawCameras.filter(cam => cam.type?.toUpperCase() === 'IP_CAM');
+  }, [rawCameras]);
 
-  const cameras = filteredCameras;
-  const thumbnailCamera = thumbnailCameraId
-    ? cameras.find(camera => camera.id === thumbnailCameraId) || null
-    : null;
+  const filteredCameras = useMemo(() => {
+    return ipCameras.filter(cam =>
+      cam.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [ipCameras, searchQuery]);
+
+
 
   useEffect(() => {
-    if (!rawCameras.length) return;
+    if (!ipCameras.length) return;
 
     let isMounted = true;
 
-    rawCameras.forEach((camera) => {
-      // 1. Si la API consolidada ya nos provee el estado RTSP oficial desde el backend,
-      // confiamos en él inmediatamente y evitamos pings locales fallidos por SSL/CORS.
-      if (camera.rtspStatus && camera.rtspStatus.primary) {
-        if (!isMounted) return;
-        const statusState = camera.rtspStatus.primary === 'online' ? 'connected' : 'disconnected';
-        setStreamStatus(prev => {
-          // Solo actualizamos si el estado actual es diferente o no existe para evitar re-renders infinitos
-          if (prev[camera.id]?.hls === statusState && prev[camera.id]?.webrtc === statusState) {
-            return prev;
-          }
-          return {
-            ...prev,
-            [camera.id]: {
-              hls: statusState,
-              webrtc: statusState,
+    // Ejecuta chequeos escalonados de streams
+    const runStaggeredChecks = async () => {
+      const isCloud = !isLocal && !isRealclub && !isFrpConnection();
+      
+      // En la nube, solo verificamos las cámaras que la API reporta en duda o offline
+      // En local/FRP, seguimos verificando todas
+      const camerasToCheck = isCloud 
+        ? ipCameras.filter(cam => cam.rtspStatus?.primary !== 'online')
+        : ipCameras;
+
+      if (camerasToCheck.length === 0) return;
+
+      const batchSize = 2;
+      for (let i = 0; i < camerasToCheck.length; i += batchSize) {
+        if (!isMounted) break;
+
+        const batch = camerasToCheck.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(async (camera) => {
+            let status: CameraStreamStatus;
+
+            if (isCloud) {
+              // En la nube, solo validamos la disponibilidad de WebRTC (WHEP)
+              const webrtcStatus = await validateWebRtcEndpoint(camera);
+              status = { hls: 'checking', webrtc: webrtcStatus };
+            } else {
+              // En local, validamos HLS y WebRTC normalmente
+              status = await validateCameraStreams(camera);
             }
-          };
-        });
-        return;
+
+            if (!isMounted) return;
+
+            setStreamStatus(prev => {
+              if (prev[camera.id]?.hls === status.hls && prev[camera.id]?.webrtc === status.webrtc) {
+                return prev;
+              }
+              return {
+                ...prev,
+                [camera.id]: status,
+              };
+            });
+          })
+        );
+
+        if (i + batchSize < camerasToCheck.length) {
+          await new Promise(resolve => setTimeout(resolve, 300)); // Delay de 300ms
+        }
       }
+    };
 
-      // 2. Si no hay estado oficial de la API, procedemos con la validación de red local
-      if (streamStatus[camera.id]?.hls === 'connected' || streamStatus[camera.id]?.webrtc === 'connected') return;
+    // Primera validación al cargar la pantalla
+    runStaggeredChecks();
 
-      validateCameraStreams(camera).then((status) => {
-        if (!isMounted) return;
-        setStreamStatus(prev => ({
-          ...prev,
-          [camera.id]: status,
-        }));
-      });
-    });
+    // Ciclo de validación periódico (ping) cada 30 segundos
+    const intervalId = setInterval(() => {
+      if (isMounted) {
+        runStaggeredChecks();
+      }
+    }, 30000);
 
     return () => {
       isMounted = false;
+      clearInterval(intervalId);
     };
-  }, [rawCameras, token]);
+  }, [ipCameras, token, isLocal, isRealclub]);
 
-  // Desactivamos temporalmente la generación automática para estabilizar la app
-  /*
-  useEffect(() => {
-    if (viewMode !== 'grid' || thumbnailCameraId !== null) return;
-    // ... logic ...
-  }, [viewMode, cameras, streamStatus, cameraThumbnails, thumbnailFailures, thumbnailCameraId]);
-  */
 
   // Obtenemos los eventos históricos, idealmente con polling si la modal está abierta
 
@@ -270,179 +287,21 @@ export default function CamerasScreen() {
   }, [objectsData, actionsData]);
 
 
-  function getStreamName(camera: Camera, isFrp: boolean = false): string {
-    if (isFrp) {
-      const result = `${camera.id}-${camera.deviceId}/1`;
-      console.log(`[STREAM] getStreamName FRP(${camera.name}): "${result}"`);
-      return result;
-    }
-    if (camera.name && camera.deviceId) {
-      const nameParts = camera.name.split('_');
-      const cleanName = nameParts.length > 1 ? nameParts.slice(1).join('_') : camera.name;
-      const result = `${cleanName}-${camera.deviceId}`;
-      console.log(`[STREAM] getStreamName PROD(${camera.name}): "${result}"`);
-      return result;
-    }
-    return camera.deviceId || `camara${camera.id}`;
-  }
-
-  /**
-   * URL HLS — Apunta al servidor real en producción o al túnel FRP en entornos locales.
-   */
   function getHlsUrl(camera: Camera, cacheBust?: number): string {
     const suffix = cacheBust ? `?_cb=${cacheBust}` : '';
-
-    let effectiveDomain = domain;
-    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
-      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
-      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
-    }
-
-    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
-    if (isIpOrLocal && effectiveDomain) {
-      const parts = effectiveDomain.split(':');
-      const host = parts[0];
-      const apiPort = parts[1];
-
-      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
-        const streamName = getStreamName(camera, true);
-        let hlsHttpsPort = '18891';
-        if (apiPort === '29090') hlsHttpsPort = '28891';
-        else if (apiPort === '39090') hlsHttpsPort = '38891';
-        return `https://local.imperium.pe:${hlsHttpsPort}/${streamName}/index.m3u8${suffix}`;
-      }
-
-      const streamName = getStreamName(camera, false);
-      return `http://${host}:8888/${streamName}/index.m3u8${suffix}`;
-    }
-
-    const streamName = getStreamName(camera, false);
-    return `https://${PROD_MEDIA_DOMAIN}:8888/${streamName}/index.m3u8${suffix}`;
+    const streams = getCameraStreams(camera, isFrpConnection());
+    return streams.hls ? `${streams.hls}${suffix}` : '';
   }
-  /**
-   * URL WHEP (WebRTC) — Apunta al servidor real en producción o al túnel FRP en entornos locales.
-   */
+
   function getWebRtcUrl(camera: Camera): string {
-    let effectiveDomain = domain;
-    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
-      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
-      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
-    }
-
-    const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
-    if (isIpOrLocal && effectiveDomain) {
-      const parts = effectiveDomain.split(':');
-      const host = parts[0];
-      const apiPort = parts[1];
-
-      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
-        const streamName = getStreamName(camera, true);
-        let whepHtpsPort = '18890';
-        if (apiPort === '29090') whepHtpsPort = '28890';
-        else if (apiPort === '39090') whepHtpsPort = '38890';
-        return `https://local.imperium.pe:${whepHtpsPort}/${streamName}/`;
-      }
-
-      const streamName = getStreamName(camera, false);
-      return `http://${host}:8554/${streamName}/`;
-    }
-
-    const streamName = getStreamName(camera, false);
-    return `https://${PROD_MEDIA_DOMAIN}/webrtc/${streamName}/whep`;
+    const streams = getCameraStreams(camera, isFrpConnection());
+    return streams.webrtc;
   }
 
   function getCameraThumbnail(_camera: Camera) {
     return 'https://plus.unsplash.com/premium_photo-1675016457613-2291390d1bf6?w=300&q=80';
   }
 
-  function getThumbnailCaptureHtml(camera: Camera) {
-    const videoUrl = getHlsUrl(camera);
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-        <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12"></script>
-        <style>
-          html, body { margin: 0; padding: 0; width: 160px; height: 90px; background: #050505; overflow: hidden; }
-          video { width: 160px; height: 90px; object-fit: cover; background: #050505; }
-          canvas { display: none; }
-        </style>
-      </head>
-      <body>
-        <video id="video" autoplay muted playsinline></video>
-        <canvas id="canvas" width="320" height="180"></canvas>
-        <script>
-          var video = document.getElementById('video');
-          var canvas = document.getElementById('canvas');
-          var url = '${videoUrl}';
-          var attempts = 0;
-          var done = false;
-
-          video.crossOrigin = 'anonymous';
-
-          function post(payload) {
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-            }
-          }
-
-          function fail() {
-            if (done) return;
-            done = true;
-            post({ type: 'camera_thumbnail_failed', cameraId: ${camera.id} });
-          }
-
-          function capture() {
-            if (done) return;
-            attempts += 1;
-
-            if (!video.videoWidth || !video.videoHeight) {
-              if (attempts > 10) fail();
-              else setTimeout(capture, 500);
-              return;
-            }
-
-            try {
-              var ctx = canvas.getContext('2d');
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              var uri = canvas.toDataURL('image/jpeg', 0.72);
-              done = true;
-              post({ type: 'camera_thumbnail', cameraId: ${camera.id}, uri: uri });
-            } catch (e) {
-              if (attempts > 10) fail();
-              else setTimeout(capture, 500);
-            }
-          }
-
-          video.addEventListener('loadeddata', function() { setTimeout(capture, 400); });
-          video.addEventListener('canplay', function() { setTimeout(capture, 400); });
-          video.addEventListener('error', fail);
-          setTimeout(fail, 9000);
-
-          if (window.Hls && Hls.isSupported()) {
-            var hls = new Hls({ debug: false, enableWorker: true, lowLatencyMode: true });
-            hls.loadSource(url);
-            hls.attachMedia(video);
-            hls.on(Hls.Events.MANIFEST_PARSED, function() {
-              video.play().catch(function() {});
-            });
-            hls.on(Hls.Events.ERROR, function(e, data) {
-              if (data && data.fatal) fail();
-            });
-          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
-            video.addEventListener('loadedmetadata', function() {
-              video.play().catch(function() {});
-            });
-          } else {
-            fail();
-          }
-        </script>
-      </body>
-      </html>
-    `;
-  }
 
   function updateStreamStatus(cameraId: number, protocol: keyof CameraStreamStatus, state: StreamState) {
     setStreamStatus(prev => ({
@@ -469,7 +328,11 @@ export default function CamerasScreen() {
 
   async function validateHlsStream(camera: Camera): Promise<StreamState> {
     try {
-      const playlistUrl = getHlsUrl(camera);
+      const baseUrl = getHlsUrl(camera);
+      if (!baseUrl) return 'disconnected';
+      const token = workspaceTokenForStream;
+      const playlistUrl = token ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?' }token=${token}` : baseUrl;
+
       // Petición GET rápida de texto con timeout de 1500ms
       const res = await fetchWithTimeout(playlistUrl, { cache: 'no-store' as any }, 1500);
       if (!res.ok) return 'disconnected';
@@ -478,27 +341,47 @@ export default function CamerasScreen() {
       // Si contiene la cabecera estándar de HLS, el stream está activo
       return text.includes('#EXTM3U') ? 'connected' : 'disconnected';
     } catch {
-      // Si ocurre un error de red/SSL en el celular, asumimos defensivamente que está CONNECTED
-      return 'connected';
+      // Si ocurre un error de red/SSL en el celular, retornamos disconnected
+      return 'disconnected';
     }
   }
 
   async function validateWebRtcEndpoint(camera: Camera): Promise<StreamState> {
     try {
       const streamToken = workspaceTokenForStream;
+      const baseUrl = getWebRtcUrl(camera);
+      if (!baseUrl) return 'disconnected';
+
+      // En conexiones FRP locales, el puerto 18890 sirve una página HTML en la raíz del stream
+      // que siempre da 200 OK. Para validar el video real, consultamos con OPTIONS al endpoint /whep real.
+      if (isFrpConnection()) {
+        const whepUrl = `${baseUrl}whep`;
+        const urlWithToken = streamToken ? `${whepUrl}${whepUrl.includes('?') ? '&' : '?' }token=${streamToken}` : whepUrl;
+        const res = await fetchWithTimeout(urlWithToken, {
+          method: 'OPTIONS',
+        }, 1500);
+        return res.status >= 200 && res.status < 400 ? 'connected' : 'disconnected';
+      }
+
+      // En conexiones Cloud, WHEP soporta consulta de capacidades via OPTIONS.
       const headers = streamToken ? { Authorization: `Bearer ${streamToken}` } : undefined;
-      const res = await fetchWithTimeout(getWebRtcUrl(camera), {
+      const res = await fetchWithTimeout(baseUrl, {
         method: 'OPTIONS',
         headers,
-      });
+      }, 1500);
       return res.status >= 200 && res.status < 500 && res.status !== 404 ? 'connected' : 'disconnected';
     } catch {
-      // Si ocurre un error de red/SSL en el celular, asumimos defensivamente que está CONNECTED
-      return 'connected';
+      // Si ocurre un error de red/SSL en el celular, retornamos disconnected
+      return 'disconnected';
     }
   }
 
   async function validateCameraStreams(camera: Camera): Promise<CameraStreamStatus> {
+    if (isFrpConnection()) {
+      const webrtc = await validateWebRtcEndpoint(camera);
+      return { hls: 'disconnected', webrtc };
+    }
+
     const [hls, webrtc] = await Promise.all([
       validateHlsStream(camera),
       validateWebRtcEndpoint(camera),
@@ -512,11 +395,59 @@ export default function CamerasScreen() {
   }
 
   function isOnline(camera: Camera) {
+    const isCloud = !isLocal && !isRealclub && !isFrpConnection();
+
+    if (isCloud) {
+      // 1. Regla de confianza: si el backend dice online, está online
+      if (camera.rtspStatus?.primary === 'online') {
+        return true;
+      }
+
+      // 2. Regla de rescate por WebRTC en caliente (OPTIONS en segundo plano)
+      const status = getCameraStatus(camera);
+      if (status.webrtc === 'connected') {
+        return true; // Rescatada: el Media Server sí tiene stream
+      }
+      if (status.webrtc === 'disconnected') {
+        return false; // Confirmado Offline
+      }
+
+      // 3. Fallback mientras se está evaluando ('checking')
+      return camera.rtspStatus?.primary !== 'offline';
+    }
+
     const status = getCameraStatus(camera);
-    if (status.hls === 'connected' || status.webrtc === 'connected') return true;
-    if (camera.rtspStatus?.primary === 'online') return true;
-    return false;
+
+    // Caso FRP: Validación mediante WebRTC WHEP
+    if (isFrpConnection()) {
+      if (status.webrtc === 'connected') return true;
+      if (status.webrtc === 'disconnected') return false;
+      return camera.rtspStatus?.primary !== 'offline';
+    }
+
+    // Caso LOCAL: Para local convencional, la única validación 100% real de que hay video es HLS (que la playlist index.m3u8 exista).
+    // Evitamos WebRTC WHEP para la decisión Online/Offline porque el servidor de MediaMTX responde
+    // OPTIONS 200/204 por configuración estática del path incluso si la cámara no tiene transmisión activa.
+    if (status.hls === 'connected') return true;
+    if (status.hls === 'disconnected') {
+      return false;
+    }
+    // Si aún está verificando ('checking'), asumimos online si el backend dice 'online' o 'unknown' (no 'offline' explícito)
+    return camera.rtspStatus?.primary !== 'offline';
   }
+
+  const { activeCount, inactiveCount } = useMemo(() => {
+    let active = 0;
+    let inactive = 0;
+    ipCameras.forEach(cam => {
+      if (isOnline(cam)) {
+        active++;
+      } else {
+        inactive++;
+      }
+    });
+    return { activeCount: active, inactiveCount: inactive };
+  }, [ipCameras, streamStatus]);
 
   function getHlsHtml(camera: Camera) {
     const videoUrl = getHlsUrl(camera);
@@ -688,14 +619,16 @@ export default function CamerasScreen() {
     let effectiveDomain = domain;
     if ((currentWs?.id || '').toLowerCase() === 'realclub') {
       const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
-      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+      effectiveDomain = localFrpWs?.domain || 'local.imperium.pe:19090';
     }
     const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
     if (!isIpOrLocal || !effectiveDomain) return false;
     const parts = effectiveDomain.split(':');
     const host = parts[0];
     const apiPort = parts[1];
-    return host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090';
+    const apiPortNum = apiPort ? parseInt(apiPort, 10) : 0;
+    const isFrpPort = apiPortNum >= 19090 && apiPortNum <= 58090 && (apiPortNum - 19090) % 1000 === 0;
+    return host === 'local.imperium.pe' || isFrpPort;
   }
 
   if (loading) {
@@ -728,6 +661,63 @@ export default function CamerasScreen() {
         <Text style={{ color: isDarkMode ? '#ffffff' : '#111827', fontSize: 26, fontWeight: '800' }}>Red de Cámaras</Text>
       </View>
 
+      {/* Cajas de Estadísticas de Cámaras */}
+      <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 12, marginBottom: 15 }}>
+        <View style={{
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+          padding: 12,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: isDarkMode ? '#334155' : '#e2e8f0',
+          gap: 10
+        }}>
+          <View style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            backgroundColor: '#22c55e15',
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}>
+            <Ionicons name="videocam" size={20} color="#22c55e" />
+          </View>
+          <View>
+            <Text style={{ fontSize: 18, fontWeight: '800', color: isDarkMode ? '#fff' : '#1e293b' }}>{activeCount}</Text>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: isDarkMode ? '#94a3b8' : '#64748b' }}>Activas</Text>
+          </View>
+        </View>
+
+        <View style={{
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+          padding: 12,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: isDarkMode ? '#334155' : '#e2e8f0',
+          gap: 10
+        }}>
+          <View style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            backgroundColor: '#ef444415',
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}>
+            <Ionicons name="videocam-off" size={20} color="#ef4444" />
+          </View>
+          <View>
+            <Text style={{ fontSize: 18, fontWeight: '800', color: isDarkMode ? '#fff' : '#1e293b' }}>{inactiveCount}</Text>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: isDarkMode ? '#94a3b8' : '#64748b' }}>Desactivadas</Text>
+          </View>
+        </View>
+      </View>
+
 
       <View style={{ paddingHorizontal: 16, marginBottom: 15 }}>
         <View style={styles.searchBarContainer}>
@@ -755,6 +745,8 @@ export default function CamerasScreen() {
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.lista}
         columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : undefined}
+        onRefresh={handleManualRefresh}
+        refreshing={manualRefresh}
         renderItem={({ item }) => {
           const online = isOnline(item);
 
@@ -765,7 +757,7 @@ export default function CamerasScreen() {
                 onPress={() => setSelected(item)}
               >
                 <ImageBackground
-                  source={{ uri: cameraThumbnails[item.id] || getCameraThumbnail(item) }}
+                  source={{ uri: getCameraThumbnail(item) }}
                   style={styles.cardGridTop}
                   imageStyle={!online ? { opacity: 0.4 } : {}}
                 >
@@ -773,11 +765,6 @@ export default function CamerasScreen() {
                     <View style={styles.badgeWarning}>
                       <Ionicons name="warning" size={10} color="#000" />
                       <Text style={styles.badgeWarningText}>MVT</Text>
-                    </View>
-                  ) : online && (isLocal || item.recording?.active) ? (
-                    <View style={styles.badgeRec}>
-                      <View style={[styles.statusDot, { backgroundColor: '#fff' }]} />
-                      <Text style={styles.badgeRecText}>REC</Text>
                     </View>
                   ) : null}
 
@@ -868,37 +855,6 @@ export default function CamerasScreen() {
         }
       />
 
-      {thumbnailCamera && (
-        <View style={styles.thumbnailWorker}>
-          <WebView
-            key={thumbnailCamera.id}
-            source={{ html: getThumbnailCaptureHtml(thumbnailCamera), baseUrl: getWebViewBaseUrl() }}
-            style={styles.thumbnailWorkerWebview}
-            scrollEnabled={false}
-            allowsInlineMediaPlayback={true}
-            mediaPlaybackRequiresUserAction={false}
-            onMessage={(event) => {
-              try {
-                const evt = JSON.parse(event.nativeEvent.data);
-
-                if (evt.type === 'camera_thumbnail' && evt.uri) {
-                  setCameraThumbnails(prev => ({
-                    ...prev,
-                    [evt.cameraId]: evt.uri,
-                  }));
-                  setThumbnailCameraId(null);
-                }
-
-                if (evt.type === 'camera_thumbnail_failed') {
-                  setThumbnailCameraId(null);
-                }
-              } catch (e) {
-                setThumbnailCameraId(null);
-              }
-            }}
-          />
-        </View>
-      )}
 
       {/* MODAL DE VIDEO */}
       <Modal
@@ -954,9 +910,10 @@ export default function CamerasScreen() {
                 key={`stream-${selected.id}-${streamMode}`}
                 source={
                   streamMode === 'webrtc'
-                    ? isFrpConnection()
-                      ? { uri: `${getWebRtcUrl(selected)}?token=${workspaceTokenForStream}` }
-                      : { html: getWebRtcHtml(selected), baseUrl: getWebViewBaseUrl() }
+                    ? (isFrpConnection()
+                        ? { uri: `${getWebRtcUrl(selected)}?token=${workspaceTokenForStream}` }
+                        : { html: getWebRtcHtml(selected), baseUrl: getWebViewBaseUrl() }
+                      )
                     : { html: getHlsHtml(selected), baseUrl: getWebViewBaseUrl() }
                 }
                 style={styles.webview}
@@ -1141,33 +1098,7 @@ const getStyles = (isDark: boolean) => {
       borderBottomWidth: 0,
       backgroundColor: bgMain,
     },
-    headerTitleWrap: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: 8,
-    },
-    titulo: {
-      color: textPrimary,
-      fontSize: 24,
-      fontWeight: '700',
-    },
-    toggleGroup: {
-      flexDirection: 'row',
-      backgroundColor: isDark ? '#161622' : '#e5e7eb',
-      borderRadius: 4,
-      borderWidth: 1,
-      borderColor: borderCol,
-      overflow: 'hidden',
-    },
-    toggleBtn: {
-      paddingHorizontal: 8,
-      paddingVertical: 6,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    toggleBtnActive: {
-      backgroundColor: Colors.brand.primary + '20',
-    },
+
     filterBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1179,11 +1110,7 @@ const getStyles = (isDark: boolean) => {
       paddingVertical: 6,
       borderRadius: Layout.borderRadius.input,
     },
-    filterBtnText: {
-      color: textPrimary,
-      fontSize: 12,
-      fontWeight: '500',
-    },
+
     searchBarContainer: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1242,46 +1169,14 @@ const getStyles = (isDark: boolean) => {
       shadowRadius: 8,
       elevation: isDark ? 0 : 2,
     },
-    cardGridOffline: {
-      opacity: 0.6,
-    },
+
     cardGridTop: {
       width: '100%',
       height: '100%',
       backgroundColor: isDark ? '#000000' : '#F1F5F9',
       position: 'relative',
     },
-    thumbnailWorker: {
-      position: 'absolute',
-      left: -500,
-      top: -500,
-      width: 160,
-      height: 90,
-      opacity: 0.01,
-    },
-    thumbnailWorkerWebview: {
-      width: 160,
-      height: 90,
-      backgroundColor: '#050505',
-    },
-    badgeRec: {
-      position: 'absolute',
-      top: 6,
-      right: 6,
-      backgroundColor: 'rgba(244, 67, 54, 0.9)',
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 4,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-    },
-    badgeRecText: {
-      color: '#fff',
-      fontSize: 9,
-      fontWeight: 'bold',
-      letterSpacing: 1,
-    },
+
     cardInfoOverlay: {
       position: 'absolute',
       bottom: 0,
@@ -1365,11 +1260,7 @@ const getStyles = (isDark: boolean) => {
       fontSize: 13,
       fontWeight: '600',
     },
-    cardId: {
-      color: textMuted,
-      fontSize: 10,
-      marginTop: 3,
-    },
+
     cardRight: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1383,52 +1274,7 @@ const getStyles = (isDark: boolean) => {
       paddingVertical: 4,
       borderRadius: 20,
     },
-    filterModalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    filterMenu: {
-      width: '80%',
-      backgroundColor: bgCard,
-      borderRadius: 12,
-      padding: 20,
-      borderWidth: 1,
-      borderColor: borderCol,
-    },
-    filterMenuTitle: {
-      color: textSecondary,
-      fontSize: 12,
-      fontWeight: '800',
-      letterSpacing: 1,
-      marginBottom: 15,
-      opacity: 0.6,
-    },
-    filterMenuItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: borderCol,
-    },
-    filterMenuItemActive: {
-      backgroundColor: Colors.brand.primary + '10',
-      borderRadius: 8,
-      paddingHorizontal: 10,
-      marginLeft: -10,
-      marginRight: -10,
-    },
-    filterMenuItemText: {
-      color: textPrimary,
-      fontSize: 14,
-      fontWeight: '500',
-    },
-    filterMenuItemTextActive: {
-      color: Colors.brand.primary,
-      fontWeight: '700',
-    },
+
     statusText: {
       fontSize: 10,
       fontWeight: '700',
@@ -1482,29 +1328,7 @@ const getStyles = (isDark: boolean) => {
       flex: 1,
       backgroundColor: 'transparent',
     },
-    modalInfo: {
-      padding: 20,
-      gap: 12,
-    },
-    infoRow: {
-      backgroundColor: bgCard,
-      borderRadius: 10,
-      padding: 14,
-      borderWidth: 1,
-      borderColor: borderCol,
-    },
-    infoLabel: {
-      color: textMuted,
-      fontSize: 10,
-      fontWeight: '600',
-      letterSpacing: 1,
-      textTransform: 'uppercase',
-      marginBottom: 6,
-    },
-    infoVal: {
-      color: textSecondary,
-      fontSize: 12,
-    },
+
     eventsTitle: {
       color: textPrimary,
       fontSize: 13,
@@ -1533,34 +1357,7 @@ const getStyles = (isDark: boolean) => {
     eventDetails: {
       flex: 1,
     },
-    eventTag: {
-      color: Colors.brand.primary,
-      fontSize: 11,
-      fontWeight: '800',
-    },
-    eventDate: {
-      color: textMuted,
-      fontSize: 11,
-      marginTop: 3,
-    },
-    eventProbBox: {
-      alignItems: 'flex-end',
-      justifyContent: 'center',
-    },
-    eventRowText: {
-      color: textPrimary,
-    },
-    eventProb: {
-      color: textPrimary,
-      fontSize: 14,
-      fontWeight: '800',
-    },
-    eventProbLabel: {
-      color: textMuted,
-      fontSize: 9,
-      fontWeight: '600',
-      marginTop: 2,
-    },
+
     emptyEvents: {
       paddingVertical: 30,
       alignItems: 'center',
@@ -1572,59 +1369,6 @@ const getStyles = (isDark: boolean) => {
       fontSize: 12,
       textAlign: 'center',
     },
-    lastEventCard: {
-      width: '100%',
-      height: 160,
-      borderRadius: 8,
-      overflow: 'hidden',
-    },
-    lastEventImg: {
-      width: '100%',
-      height: '100%',
-    },
-    alertBadgeSmall: {
-      position: 'absolute',
-      top: 12,
-      right: 12,
-      backgroundColor: '#F44336A0',
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 12,
-      zIndex: 5,
-    },
-    alertBadgeText: {
-      color: '#fff',
-      fontSize: 9,
-      fontWeight: 'bold',
-      letterSpacing: 0.5,
-    },
-    lastEventOverlay: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      padding: 12,
-      backgroundColor: 'rgba(0,0,0,0.7)',
-    },
-    lastEventTitle: {
-      color: Colors.brand.primary,
-      fontSize: 13,
-      fontWeight: '900',
-      marginBottom: 2,
-    },
-    lastEventTime: {
-      color: '#fff',
-      fontSize: 12,
-      fontWeight: '500',
-      opacity: 0.8,
-    },
-    emptyLastEvent: {
-      backgroundColor: isDark ? '#ffffff05' : '#ffffff',
-      padding: 16,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: borderCol,
-      alignItems: 'center',
-    },
+
   });
 };

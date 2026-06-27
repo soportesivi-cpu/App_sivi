@@ -12,13 +12,15 @@ export type WorkspaceEntry = {
   users?: number;
   status?: string;
   workId?: string; // <-- NUEVO: ID de base de datos para la cabecera Referer
+  webrtcPort?: number; // Puerto HTTPS para WebRTC (FRP)
+  hlsPort?: number;    // Puerto HTTPS para HLS (FRP)
 };
 
 export const WORKSPACES: WorkspaceEntry[] = [
   { id: 'control', name: 'Imperium Control', domain: 'control.guardian.imperium.pe', https: true, type: 'cloud', cameras: 18, users: 4, status: 'Active', workId: '23' },
   { id: 'cmarket', name: 'Imperium Cmarket', domain: 'cmarket.guardian.imperium.pe', https: true, type: 'cloud', cameras: 22, users: 5, status: 'Active', workId: '24' },
   { id: 'alarms', name: 'Imperium Alarms', domain: 'alarms.guardian.imperium.pe', https: true, type: 'cloud', cameras: 15, users: 3, status: 'Active', workId: '25' },
-  { id: 'local-frp', name: 'Imperium Local FRP', domain: '63.141.255.156:19090', https: false, type: 'local', cameras: 8, users: 2, status: 'Active', workId: '23' },
+  { id: 'local-frp', name: 'Imperium Local FRP', domain: 'local.imperium.pe:19090', https: true, type: 'local', cameras: 8, users: 2, status: 'Active', workId: '23' },
   { id: 'realclub', name: 'Imperium Real Club', domain: 'realclub.guardian.imperium.pe', https: true, type: 'cloud', cameras: 12, users: 3, status: 'Active', workId: '21' },
 ];
 

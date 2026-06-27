@@ -7,6 +7,7 @@ export default function TabsLayout() {
   const { userData, impersonatedWorkspace, isDarkMode } = useAppStore();
   const themeColors = isDarkMode ? Colors.dark : Colors.light;
   const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
+  const isMonitor = userData?.role?.name?.toLowerCase() === 'monitor';
   const restrictAccess = isSuperAdmin && !impersonatedWorkspace;
   const hideCameras = restrictAccess;
 
@@ -64,7 +65,7 @@ export default function TabsLayout() {
         name="events"
         options={{
           title: 'Eventos',
-          href: restrictAccess ? null : undefined,
+          href: (restrictAccess || isMonitor) ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "flash" : "flash-outline"} size={22} color={color} />
           ),

@@ -24,7 +24,8 @@ import {
   getWorkspaceAlarmConfigurationDetail, 
   updateWorkspaceAlarmConfiguration, 
   updateWorkspaceAlarmPolygons,
-  getDevices
+  getDevices,
+  getCameraStreams
 } from '../../services/api';
 import { Colors, Layout } from '../../constants/theme';
 
@@ -193,73 +194,36 @@ export default function EventConfigScreen() {
     let effectiveDomain = domain;
     if ((currentWs?.id || '').toLowerCase() === 'realclub') {
       const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
-      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
+      effectiveDomain = localFrpWs?.domain || 'local.imperium.pe:19090';
     }
     const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
     if (!isIpOrLocal || !effectiveDomain) return false;
     const parts = effectiveDomain.split(':');
     const host = parts[0];
     const apiPort = parts[1];
-    return host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090';
-  }
-
-  function getStreamName(camera: any, isFrp: boolean = false): string {
-    const camId = camera?.id;
-    const camDevId = camera?.deviceId || camera?.device_id || camera?.uuid;
-    
-    console.log('[STREAM ROI] getStreamName input:', camera, 'isFrp:', isFrp);
-    if (isFrp) {
-      if (camId && camDevId) {
-        const result = `${camId}-${camDevId}/1`;
-        console.log(`[STREAM ROI] getStreamName output FRP: "${result}"`);
-        return result;
-      }
-      const fallback = camDevId || `camara${camId || ''}`;
-      console.log(`[STREAM ROI] getStreamName output FRP FALLBACK: "${fallback}"`);
-      return fallback;
-    }
-
-    // Para entornos no-FRP (nube pura), usamos el mismo formateo que en cameras.tsx
-    const camName = camera?.name;
-    if (camName && camDevId) {
-      const nameParts = camName.split('_');
-      const cleanName = nameParts.length > 1 ? nameParts.slice(1).join('_') : camName;
-      const result = `${cleanName}-${camDevId}`;
-      console.log(`[STREAM ROI] getStreamName output CLOUD: "${result}"`);
-      return result;
-    }
-    const fallback = camDevId || `camara${camId || ''}`;
-    console.log(`[STREAM ROI] getStreamName output CLOUD FALLBACK: "${fallback}"`);
-    return fallback;
+    const apiPortNum = apiPort ? parseInt(apiPort, 10) : 0;
+    const isFrpPort = apiPortNum >= 19090 && apiPortNum <= 58090 && (apiPortNum - 19090) % 1000 === 0;
+    return host === 'local.imperium.pe' || isFrpPort;
   }
 
   function getWebRtcUrl(camera: any): string {
-    const isFrp = isFrpConnection();
-    const streamName = getStreamName(camera, isFrp);
-    let effectiveDomain = domain;
-    if ((currentWs?.id || '').toLowerCase() === 'realclub') {
-      const localFrpWs = WORKSPACES.find(w => w.id === 'local-frp');
-      effectiveDomain = localFrpWs?.domain || '63.141.255.156:19090';
-    }
+    const streams = getCameraStreams(camera, isFrpConnection());
+    return streams.webrtc;
+  }
 
+  const getWebViewBaseUrl = () => {
+    if (isFrpConnection()) {
+      return `https://local.imperium.pe`;
+    }
+    let effectiveDomain = domain;
     const isIpOrLocal = /^\d+\.\d+\.\d+\.\d+/.test(effectiveDomain || '') || effectiveDomain?.includes('localhost') || effectiveDomain?.includes('local.imperium.pe');
     if (isIpOrLocal && effectiveDomain) {
       const parts = effectiveDomain.split(':');
       const host = parts[0];
-      const apiPort = parts[1];
-
-      if (host === '63.141.255.156' || host === 'local.imperium.pe' || apiPort === '19090' || apiPort === '29090' || apiPort === '39090') {
-        let whepHtpsPort = '18890';
-        if (apiPort === '29090') whepHtpsPort = '28890';
-        else if (apiPort === '39090') whepHtpsPort = '38890';
-        return `https://local.imperium.pe:${whepHtpsPort}/${streamName}/`;
-      }
-      return `http://${host}:8889/${streamName}/`;
+      return `https://${host}`;
     }
-
-    // Nube pura: usamos la URL proxy sobre puerto 443 sin el puerto 8889
-    return `https://${PROD_MEDIA_DOMAIN}/webrtc/${streamName}/whep`;
-  }
+    return `https://${PROD_MEDIA_DOMAIN}`;
+  };
 
   function getWebRtcHtml(camera: any): string {
     const whepUrl = getWebRtcUrl(camera);
@@ -843,13 +807,17 @@ export default function EventConfigScreen() {
           )}
           
           <View 
-            style={[styles.roiContainer, (!roiActive || roiId === null) && { opacity: 0.3 }]}
+            style={styles.roiContainer}
             onLayout={handleLayout}
           >
              {/* 1. Fondo (Video o Imagen Estática) */}
              {isPlaying && resolvedCamera ? (
                <WebView
-                 source={{ html: getWebRtcHtml(resolvedCamera) }}
+                 source={
+                   isFrpConnection()
+                     ? { uri: `${getWebRtcUrl(resolvedCamera)}?token=${workspaceTokenForStream}` }
+                     : { html: getWebRtcHtml(resolvedCamera), baseUrl: getWebViewBaseUrl() }
+                 }
                  allowsInlineMediaPlayback={true}
                  mediaPlaybackRequiresUserAction={false}
                  domStorageEnabled={true}
@@ -873,6 +841,18 @@ export default function EventConfigScreen() {
                    <Text style={styles.playBtnText}>INICIAR VIDEO EN VIVO</Text>
                  </View>
                </TouchableOpacity>
+             )}
+
+             {/* Capa de oscurecimiento controlada para no afectar la opacidad nativa del WebView */}
+             {!isPlaying && (!roiActive || roiId === null) && (
+               <View 
+                 style={{
+                   ...StyleSheet.absoluteFillObject,
+                   backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                   zIndex: 3,
+                 }} 
+                 pointerEvents="none" 
+               />
              )}
 
              {/* 2. Capa de Gestos SVG para Manipular Polígonos (Siempre visible si el ROI está activo) */}
@@ -1041,14 +1021,7 @@ const getStyles = (isDark: boolean) => {
       fontWeight: '700',
     },
 
-    // Estilos de Tablas
-    table: { borderWidth: 1, borderColor: borderCol, borderRadius: 8, overflow: 'hidden' },
-    tableHeader: { flexDirection: 'row', backgroundColor: bgCardSecondary, borderBottomWidth: 1, borderBottomColor: borderCol },
-    tableHeaderText: { color: textSecondary, fontSize: 11, fontWeight: '800' },
-    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: borderCol, backgroundColor: bgCard },
-    tableCell: { paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center' },
-    tableCellText: { color: textPrimary, fontSize: 11, fontWeight: '600' },
-    statusBadgeCell: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+
 
     // Estilos de los switches estilo Web
     switchRow: { flexDirection: 'row', gap: 8 },
@@ -1072,13 +1045,7 @@ const getStyles = (isDark: boolean) => {
     divider: { height: 1, backgroundColor: borderCol, marginVertical: 14 },
 
     selectorLabel: { color: textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-    soundScroll: { marginTop: 10 },
-    soundPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
-    soundPillActive: { backgroundColor: Colors.brand.primary + '18', borderColor: Colors.brand.primary + '40' },
-    soundPillInactive: { backgroundColor: bgCardSecondary, borderColor: borderCol },
-    soundText: { fontSize: 11, fontWeight: '700' },
-    soundTextActive: { color: Colors.brand.primary },
-    soundTextInactive: { color: textMuted },
+
 
     pointsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
     pointTag: { backgroundColor: bgCardSecondary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: borderCol },
@@ -1095,9 +1062,7 @@ const getStyles = (isDark: boolean) => {
     playBtnText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
     pauseBtn: { position: 'absolute', top: 12, right: 12, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
 
-    alarmBox: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: bgCardSecondary },
-    alarmBoxActive: { backgroundColor: 'rgba(244, 67, 54, 0.04)', borderWidth: 1, borderColor: 'rgba(244, 67, 54, 0.15)' },
-    alarmParams: { marginTop: 14 },
+
     inputGroup: { gap: 6 },
     darkInput: { 
       backgroundColor: themeColors.inputBg, 

@@ -13,11 +13,44 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "com.soportesivi.AliceGuardianApp",
+      "buildNumber": "1",
       "supportsTablet": true,
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "35F9.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "85F4.1"
+            ]
+          }
+        ]
+      },
       "infoPlist": {
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        }
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "Sivi requiere acceso a la red local para conectarse directamente a tus cámaras IP y servidores locales de monitoreo.",
+        "NSCameraUsageDescription": "Sivi requiere acceso a la cámara únicamente para habilitar la transmisión y visualización de video bidireccional en tiempo real de tus dispositivos de videovigilancia a través de WebRTC.",
+        "NSMicrophoneUsageDescription": "Sivi requiere acceso al micrófono únicamente para transmitir audio y habilitar la comunicación de voz bidireccional con tus cámaras de seguridad y altavoces integrados."
       }
     },
     "android": {
@@ -36,7 +69,17 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "@config-plugins/react-native-webrtc",
+      "expo-audio",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ]
     ],
     "extra": {
       "router": {},

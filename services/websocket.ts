@@ -12,7 +12,6 @@
  * Namespaces confirmados del HAR de producción:
  * - /workspace-data   → start_streaming("data")   → alarm_stats, alarm_throughput, face, alert
  * - /workspace-lpr    → start_streaming("lpr")    → lpr, alert
- * - /workspace-motion → start_streaming("motion") → event_motion, alert
  * - /workspace-GUNS   → start_streaming("GUNS")   → detection, alert
  */
 
@@ -24,8 +23,8 @@ import { playNotificationSound } from './sound';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
-export type AlertChannel = 'face' | 'lpr' | 'alert' | 'event_motion' | 'statistics'
-  | 'alarm_stats' | 'alarm_throughput' | 'motion' | 'data' | 'detection'
+export type AlertChannel = 'face' | 'lpr' | 'alert' | 'statistics'
+  | 'alarm_stats' | 'alarm_throughput' | 'data' | 'detection'
   | 'new_event' | 'GUNS' | 'new_alert';
 
 export type AlertPayload = {
@@ -55,11 +54,6 @@ const SIVI_NAMESPACES: NamespaceConfig[] = [
     channels: ['lpr', 'alert', 'new_alert', 'detection', 'new_event']
   },
   {
-    path: '/workspace-motion',
-    streamName: 'motion',
-    channels: ['event_motion', 'motion', 'alert', 'new_alert', 'detection', 'new_event']
-  },
-  {
     path: '/workspace-GUNS',
     streamName: 'GUNS',
     channels: ['alert', 'detection', 'new_alert', 'new_event', 'GUNS']
@@ -67,7 +61,7 @@ const SIVI_NAMESPACES: NamespaceConfig[] = [
 ];
 
 // Canales que activan sonido de notificación
-const SOUND_CHANNELS = new Set(['alert', 'face', 'lpr', 'event_motion', 'motion', 'new_alert', 'detection', 'GUNS']);
+const SOUND_CHANNELS = new Set(['alert', 'face', 'lpr', 'new_alert', 'detection', 'GUNS']);
 
 // Canales de telemetría/métricas continuas de alta frecuencia que silenciaremos en consola
 const SILENT_CHANNELS = new Set(['alarm_stats', 'alarm_throughput', 'statistics', 'data', 'states_workspace', 'states_camera', 'heartbeat', 'ping', 'pong', 'status']);
@@ -135,24 +129,19 @@ export class AlertSocketService {
 
     // ── Resolución de URL del servidor de Socket.IO ──
     let serverUrl = '';
-    const isLocal = /^\d+\.\d+\.\d+\.\d+/.test(activeDomain || '') || activeDomain?.includes('localhost') || activeDomain?.includes(':') || activeDomain?.includes('.local');
-    if (isLocal) {
-      const parts = activeDomain.split(':');
-      const host = parts[0];
-      const apiPort = parts[1];
+    const host = (activeDomain || PROD_API_DOMAIN).split(':')[0];
+    
+    // Entorno de desarrollo local estricto (localhost o IPs crudas privadas)
+    const isPlainLocal = host.includes('localhost') || /^\d+\.\d+\.\d+\.\d+/.test(host);
 
-      // FRP: Nginx unificado proxea /socket.io/ al puerto 4550 local
-      // VPN: Conectamos directo al puerto 4550
-      let wsPort = '4550';
-      if (apiPort === '19090') wsPort = '19090'; // Nginx unificado en FRP
-      else if (apiPort === '29090') wsPort = '29090';
-      else if (apiPort === '39090') wsPort = '39090';
-      else if (apiPort === '9090') wsPort = '4550'; // VPN directo
-      else if (apiPort) wsPort = apiPort;
-
-      serverUrl = `http://${host}:${wsPort}`;
+    if (isPlainLocal) {
+      // Para debug local, mantenemos HTTP y el puerto especificado
+      const port = (activeDomain || '').split(':')[1] || '4550';
+      serverUrl = `http://${host}:${port}`;
     } else {
-      serverUrl = `https://${activeDomain || PROD_API_DOMAIN}`;
+      // Para cualquier subdominio de workspace (nube, local, FRP), conectamos directo por HTTPS/WSS (puerto 443)
+      // para cumplir con las políticas de seguridad de iOS (IPA/ATS)
+      serverUrl = `https://${host}`;
     }
 
     console.log(`[WS] 🔄 Iniciando conexiones multiplexadas a ${serverUrl} (${SIVI_NAMESPACES.length} namespaces)...`);
