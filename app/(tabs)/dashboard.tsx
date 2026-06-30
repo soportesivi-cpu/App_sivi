@@ -7,7 +7,8 @@ export default function DashboardScreen() {
   const { userData, impersonatedWorkspace } = useAppStore();
 
   // Enrutador Condicional: Si es SuperAdmin y no ha seleccionado un workspace, muestra su lista global.
-  if (userData?.role?.name === 'SuperAdmin' && !impersonatedWorkspace) {
+  const userRole = (typeof userData?.role === 'object' ? userData?.role?.name : userData?.role)?.toLowerCase() || '';
+  if (userRole === 'superadmin' && !impersonatedWorkspace) {
     return <SuperAdminDashboard />;
   }
 

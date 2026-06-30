@@ -105,7 +105,7 @@ export default function CamerasScreen() {
       if (activeSession.length === 0) {
         return { workspaces: [], failures: [] };
       }
-      return getWorkspacesDevices(activeSession);
+      return getWorkspacesDevices();
     },
     refetchInterval: 15000,
   });
@@ -1075,7 +1075,7 @@ const getStyles = (isDark: boolean) => {
   const modalBg = isDark ? '#000000' : '#f9fafb';
   const toggleBg = isDark ? '#111112' : '#e5e7eb';
   const toggleText = isDark ? '#ffffff' : '#6b7280';
-  const bgCardSecondary = themeColors.surfaceSecondary;
+
 
   return StyleSheet.create({
     container: {

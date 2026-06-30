@@ -746,7 +746,7 @@ export default function SearchScreen() {
       }
       
       try {
-        const res = await getWorkspacesDevices(filteredSessions);
+        const res = await getWorkspacesDevices();
         let allDevices: any[] = [];
         const workspacesRes = res?.workspaces || [];
         workspacesRes.forEach((ws: any) => {
@@ -1158,8 +1158,7 @@ function getStyles(isDarkMode: boolean) {
     },
     headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     headerTitle: { color: theme.text, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-    avatar: { width: 34, height: 34, borderRadius: 17, overflow: 'hidden', borderWidth: 2, borderColor: '#2E9BFF40' },
-    avatarImg: { width: '100%', height: '100%' },
+
 
     scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
     
@@ -1174,9 +1173,7 @@ function getStyles(isDarkMode: boolean) {
     filterBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.inputBg, height: Layout.height.input, borderRadius: Layout.borderRadius.input, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.inputBorder },
     filterValue: { color: theme.text, fontSize: 13, fontWeight: '700' },
 
-    workspaceSelectorContainer: { marginBottom: 15, gap: 8 },
-    workspaceSelectorBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.inputBg, height: Layout.height.input, borderRadius: Layout.borderRadius.input, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.inputBorder },
-    workspaceSelectorValue: { color: theme.text, fontSize: 13, fontWeight: '700' },
+
 
     executeBtn: { backgroundColor: Colors.brand.primary, height: 58, borderRadius: Layout.borderRadius.input, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 25, shadowColor: Colors.brand.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
     executeBtnText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
@@ -1237,7 +1234,7 @@ function getStyles(isDarkMode: boolean) {
     modalItemActive: { backgroundColor: Colors.brand.primary + '15' },
     modalItemText: { color: theme.textSecondary, fontSize: 15, fontWeight: '600' },
     modalItemTextActive: { color: Colors.brand.primary, fontWeight: '800' },
-    timeInput: { backgroundColor: theme.surface, color: theme.text, padding: 15, borderRadius: 12, fontSize: 18, fontWeight: '800', textAlign: 'center', borderWidth: 1, borderColor: theme.border },
+
 
     // Estilos de Calendario
     calendarContainer: { padding: 15, backgroundColor: theme.surface, borderRadius: 20 },
@@ -1303,8 +1300,7 @@ function getStyles(isDarkMode: boolean) {
     },
 
     // Badge de sucursal en tarjetas
-    workspaceBadge: { backgroundColor: Colors.brand.primary + '15', borderColor: Colors.brand.primary + '30', borderWidth: 0.5, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-    workspaceBadgeText: { color: Colors.brand.primary, fontSize: 8, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+
 
     // Modal de Detalle de Resultado
     detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
@@ -1325,10 +1321,6 @@ function getStyles(isDarkMode: boolean) {
     detailMetaValue: { color: theme.text, fontSize: 14, fontWeight: '700' },
     tagChip: { backgroundColor: Colors.brand.primary + '15', borderWidth: 1, borderColor: Colors.brand.primary + '30', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
     tagChipText: { color: Colors.brand.primary, fontSize: 12, fontWeight: '700' },
-    detailActions: { flexDirection: 'row', gap: 12, marginBottom: 40, marginTop: 8 },
-    detailActionBtn: { flex: 1, height: 52, borderRadius: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
-    detailActionConfirm: { backgroundColor: '#4CAF50' },
-    detailActionFP: { backgroundColor: '#F44336' },
-    detailActionText: { color: '#fff', fontSize: 14, fontWeight: '900' },
+
   });
 }

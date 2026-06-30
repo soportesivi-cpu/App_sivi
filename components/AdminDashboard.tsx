@@ -61,7 +61,8 @@ export default function AdminDashboard() {
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [selectedInterval, setSelectedInterval] = useState<'hoy' | 'ayer' | 'semana' | '15dias' | '30dias'>('hoy');
 
-  const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
+  const userRole = (typeof userData?.role === 'object' ? userData?.role?.name : userData?.role)?.toLowerCase() || '';
+  const isSuperAdmin = userRole === 'superadmin';
 
   // Intercepta el botón de atrás físico para regresar al lobby de SuperAdmin en vez de salir de la aplicación
   useFocusEffect(
@@ -95,7 +96,7 @@ export default function AdminDashboard() {
           Alert.alert('Sincronización', res.message);
         }
       } else {
-        const data = await getDashboard(impersonatedWorkspace?.work_id, selectedInterval);
+        const data = await getDashboard(selectedInterval);
         setDashboardData(data);
       }
     } catch (err) {
@@ -132,7 +133,7 @@ export default function AdminDashboard() {
           setWorkspaces(wsList);
           setDashboardData(null);
         } else {
-          const data = await getDashboard(impersonatedWorkspace?.work_id, selectedInterval);
+          const data = await getDashboard(selectedInterval);
           setDashboardData(data);
           setWorkspaces([]);
         }
@@ -175,7 +176,7 @@ export default function AdminDashboard() {
             </View>
           )}
           <View style={styles.roleBadge}>
-            <Text style={styles.roleText}>{userData?.role?.name === 'SuperAdmin' ? 'SUPER' : 'ADM'}</Text>
+            <Text style={styles.roleText}>{isSuperAdmin ? 'SUPER' : 'ADM'}</Text>
           </View>
           {isSuperAdmin && !impersonatedWorkspace ? (
             <TouchableOpacity onPress={handleLogout} style={styles.iconButton}>
@@ -302,35 +303,37 @@ export default function AdminDashboard() {
           </View>
 
           {/* SECCIÓN TIEMPO DE RESPUESTA DEL OPERADOR */}
-          <View style={styles.responseTimeContainer}>
-            <Text style={styles.classificationTitle}>TIEMPO DE RESPUESTA DEL OPERADOR</Text>
-            
-            <View style={styles.responseTimeRow}>
-              {/* Promedio */}
-              <View style={[styles.responseCol, styles.rightBorder]}>
-                <Text style={styles.responseLabel}>Promedio</Text>
-                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.avg || '-'}</Text>
-              </View>
+          {!['monitor', 'operator', 'operador'].includes(userRole) && (
+            <View style={styles.responseTimeContainer}>
+              <Text style={styles.classificationTitle}>TIEMPO DE RESPUESTA DEL OPERADOR</Text>
               
-              {/* Mediana */}
-              <View style={[styles.responseCol, styles.rightBorder]}>
-                <Text style={styles.responseLabel}>Mediana</Text>
-                <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.median || '-'}</Text>
-              </View>
-              
-              {/* Mínimo */}
-              <View style={[styles.responseCol, styles.rightBorder]}>
-                <Text style={styles.responseLabel}>Mínimo</Text>
-                <Text style={styles.responseValueGreen}>{dashboardData.responseTime?.min || '-'}</Text>
-              </View>
-              
-              {/* % sin respuesta */}
-              <View style={styles.responseCol}>
-                <Text style={styles.responseLabel}>% sin respuesta</Text>
-                <Text style={styles.responseValueYellow}>{dashboardData.responseTime?.unanswered || '-'}</Text>
+              <View style={styles.responseTimeRow}>
+                {/* Promedio */}
+                <View style={[styles.responseCol, styles.rightBorder]}>
+                  <Text style={styles.responseLabel}>Promedio</Text>
+                  <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.avg || '-'}</Text>
+                </View>
+                
+                {/* Mediana */}
+                <View style={[styles.responseCol, styles.rightBorder]}>
+                  <Text style={styles.responseLabel}>Mediana</Text>
+                  <Text style={styles.responseValueWhite}>{dashboardData.responseTime?.median || '-'}</Text>
+                </View>
+                
+                {/* Mínimo */}
+                <View style={[styles.responseCol, styles.rightBorder]}>
+                  <Text style={styles.responseLabel}>Mínimo</Text>
+                  <Text style={styles.responseValueGreen}>{dashboardData.responseTime?.min || '-'}</Text>
+                </View>
+                
+                {/* % sin respuesta */}
+                <View style={styles.responseCol}>
+                  <Text style={styles.responseLabel}>% sin respuesta</Text>
+                  <Text style={styles.responseValueYellow}>{dashboardData.responseTime?.unanswered || '-'}</Text>
+                </View>
               </View>
             </View>
-          </View>
+          )}
 
           {/* CUADRICULA DE MÉTRICAS 2x2 (Diseño exacto de la imagen de Stitch) */}
           <View style={styles.gridContainer}>
@@ -574,19 +577,7 @@ const getStyles = (isDark: boolean) => {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.outlineVariant + '50',
-    marginRight: 8,
-  },
-  headerTitle: {
-    color: theme.onBackground,
-    fontSize: 18,
-    fontWeight: '600',
-  },
+
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -618,17 +609,12 @@ const getStyles = (isDark: boolean) => {
     marginLeft: 12,
     padding: 4,
   },
-  row: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
+
   rowCenter: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  flex1: {
-    flex: 1,
-  },
+
   card: {
     backgroundColor: theme.surfaceLow,
     borderRadius: 8,
@@ -658,17 +644,7 @@ const getStyles = (isDark: boolean) => {
     borderRadius: 3,
     marginRight: 4,
   },
-  progressBarBg: {
-    height: 6,
-    backgroundColor: theme.surfaceHigh,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: theme.primary,
-    borderRadius: 3,
-  },
+
   sectionTitle: {
     color: theme.onSurface,
     fontSize: 12,
@@ -683,31 +659,7 @@ const getStyles = (isDark: boolean) => {
     justifyContent: 'space-between',
     gap: 8,
   },
-  kpiCard: {
-    width: '48%',
-    backgroundColor: theme.surfaceLow,
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.outline,
-    marginBottom: 8,
-  },
-  kpiHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  kpiLabel: {
-    color: theme.onSurface,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  kpiValue: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    fontFamily: 'monospace',
-  },
+
   alertRow: {
     flexDirection: 'row',
     backgroundColor: theme.surfaceLow,
@@ -760,60 +712,8 @@ const getStyles = (isDark: boolean) => {
     borderRadius: 4,
     marginLeft: 8,
   },
-  modalBg: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: theme.surfaceLow,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.outlineVariant + '30',
-  },
-  modalHeaderTitle: {
-    color: theme.onSurface,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  modalBody: {
-    padding: 20,
-    gap: 24,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  settingLabel: {
-    color: theme.onSurface,
-    fontSize: 16,
-  },
-  logoutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.error + '20',
-    borderWidth: 1,
-    borderColor: theme.error + '50',
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 10,
-  },
-  logoutText: {
-    color: theme.error,
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
+
+
   dashboardTitle: {
     color: theme.onBackground,
     fontSize: 22,
@@ -956,15 +856,7 @@ const getStyles = (isDark: boolean) => {
     justifyContent: 'center',
     alignItems: 'center',
   },
-  donutBase: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
+
   donutHole: {
     width: 86,
     height: 86,

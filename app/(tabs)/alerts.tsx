@@ -718,7 +718,7 @@ export default function AlertsScreen() {
       // 1. Mapa de dispositivos — siempre via gateway
       let devicesMap: Record<string, string> = {};
       try {
-        const devsData = await getWorkspacesDevices(activeSession);
+        const devsData = await getWorkspacesDevices();
         const devsList = devsData?.workspaces?.[0]?.devices || [];
         devsList.forEach((d: any) => {
           const idStr = String(d.id);
@@ -1937,11 +1937,7 @@ const getStyles = (isDark: boolean) => {
       marginLeft: 10,
       paddingVertical: 8,
     },
-    titulo: { color: textPrimary, fontSize: 24, fontWeight: '700' },
-    subtitulo: { color: Colors.brand.primary, fontSize: 13, fontWeight: '500', marginTop: 2 },
-    liveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f4433620', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
-    liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#f44336' },
-    liveText: { color: '#f44336', fontSize: 11, fontWeight: '700' },
+
 
     lista: {
       paddingHorizontal: 10,
@@ -2332,44 +2328,7 @@ const getStyles = (isDark: boolean) => {
       justifyContent: 'center',
       alignItems: 'center',
     },
-    sentNotesList: {
-      marginTop: 15,
-      gap: 10,
-    },
-    sentNoteCard: {
-      backgroundColor: themeColors.inputBg,
-      borderRadius: Layout.borderRadius.input,
-      padding: 12,
-      borderWidth: 1,
-      borderColor: themeColors.inputBorder,
-    },
-    sentNoteHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 6,
-    },
-    sentNoteUserBadge: {
-      backgroundColor: Colors.brand.primary + '15',
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 4,
-    },
-    sentNoteUserText: {
-      color: Colors.brand.primary,
-      fontSize: 9,
-      fontWeight: '800',
-    },
-    sentNoteTimeText: {
-      color: textMuted,
-      fontSize: 9,
-      fontFamily: 'monospace',
-    },
-    sentNoteBodyText: {
-      color: textSecondary,
-      fontSize: 12,
-      lineHeight: 16,
-    },
+
 
     // IMAGE ZOOM MODAL STYLES
     zoomContainer: {

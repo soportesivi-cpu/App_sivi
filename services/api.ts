@@ -239,12 +239,17 @@ export async function autoLogin(email: string, password: string) {
       workId: '23'
     };
 
+    const userWithRole = {
+      ...firstResult.user,
+      role: firstResult.user?.role || firstResult.role
+    };
+
     return {
       workspace,
       data: {
         token: firstResult.token,
         jwt: firstResult.jwt,
-        user: firstResult.user,
+        user: userWithRole,
         sessions: results
       }
     };
@@ -492,7 +497,7 @@ function normalizeSearchRows(rows: any[], customDomain?: string): any[] {
   });
 }
 
-export async function getDashboard(workId?: string | null, interval: string = 'hoy') {
+export async function getDashboard(interval: string = 'hoy') {
   try {
     const now = new Date();
     let dateFrom: Date;
@@ -972,7 +977,7 @@ export async function getWorkspaces(): Promise<any[]> {
 }
 
 
-export async function getWorkspacesDevices(sessions: any[]) {
+export async function getWorkspacesDevices() {
   return fetchGateway('/mobile/workspaces/devices');
 }
 

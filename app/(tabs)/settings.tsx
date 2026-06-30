@@ -20,9 +20,10 @@ export default function SettingsScreen() {
   const fullName = userData 
     ? `${userData.first_name || userData.firstName || ''} ${userData.last_name || userData.lastName || ''}`.trim() || userData.Username || userData.username || 'Usuario'
     : 'Usuario';
-  const roleName = userData?.role?.name === 'SuperAdmin' 
+  const userRole = (typeof userData?.role === 'object' ? userData?.role?.name : userData?.role)?.toLowerCase() || '';
+  const roleName = userRole === 'superadmin' 
     ? 'SUPERADMIN' 
-    : (userData?.role?.name?.toLowerCase() === 'monitor' ? 'MONITOR' : 'ADMIN');
+    : (['monitor', 'operator', 'operador'].includes(userRole) ? 'MONITOR' : 'ADMIN');
   const workspaceName = currentWs?.name || currentWs?.id || currentWs?.workspace || 'Workspace';
 
   const styles = getStyles(isDarkMode);

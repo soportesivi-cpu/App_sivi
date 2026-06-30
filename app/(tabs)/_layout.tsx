@@ -6,8 +6,9 @@ import { Colors } from '../../constants/theme';
 export default function TabsLayout() {
   const { userData, impersonatedWorkspace, isDarkMode } = useAppStore();
   const themeColors = isDarkMode ? Colors.dark : Colors.light;
-  const isSuperAdmin = userData?.role?.name === 'SuperAdmin';
-  const isMonitor = userData?.role?.name?.toLowerCase() === 'monitor';
+  const userRole = (typeof userData?.role === 'object' ? userData?.role?.name : userData?.role)?.toLowerCase() || '';
+  const isSuperAdmin = userRole === 'superadmin';
+  const isMonitor = ['monitor', 'operator', 'operador'].includes(userRole);
   const restrictAccess = isSuperAdmin && !impersonatedWorkspace;
   const hideCameras = restrictAccess;
 
